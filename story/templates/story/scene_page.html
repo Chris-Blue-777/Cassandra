@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Cassandra Prototype</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+            background: #f7f7f7;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .panel {
+            background: white;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 140px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        select, button {
+            padding: 8px 12px;
+            margin-top: 8px;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background: #fafafa;
+            padding: 12px;
+            border: 1px solid #eee;
+        }
+        .muted {
+            color: #666;
+            font-size: 0.95em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Cassandra Prototype</h1>
+
+    {% if error %}
+        <p style="color:red;">{{ error }}</p>
+    {% endif %}
+
+    {% if active_world %}
+    <div class="panel" style="margin-bottom: 24px;">
+        <h2>Active World</h2>
+        <p><strong>{{ active_world.name }}</strong></p>
+        <p class="muted">{{ active_world.description }}</p>
+
+        <form method="post" action="{% url 'switch_world' %}">
+            {% csrf_token %}
+            <label for="world_id">Switch world:</label>
+            <select name="world_id" id="world_id">
+                {% for world in worlds %}
+                    <option value="{{ world.id }}" {% if world.id == active_world.id %}selected{% endif %}>
+                        {{ world.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <button type="submit">Switch</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Scene Input</h2>
+            <form method="post" action="{% url 'generate_draft' %}">
+                {% csrf_token %}
+                <textarea name="user_input" placeholder="Enter the next scene beat..."></textarea>
+                <button type="submit">Generate Draft</button>
+            </form>
+
+            <h3>Current Scene State</h3>
+            {% if scene_state %}
+                <p><strong>Location:</strong> {{ scene_state.location }}</p>
+                <pre>{{ scene_state.cast_json }}</pre>
+                <p><strong>Pending Intents:</strong></p>
+                <pre>{{ scene_state.pending_intents_json }}</pre>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <h2>Latest Draft</h2>
+            {% if proposal %}
+                <p class="muted">Created: {{ proposal.created_at }}</p>
+                <pre>{{ proposal.draft }}</pre>
+
+                {% if not proposal.is_approved %}
+                <form method="post" action="{% url 'approve_draft' proposal.id %}">
+                    {% csrf_token %}
+                    <button type="submit">Approve Draft</button>
+                </form>
+                {% else %}
+                    <p><strong>Approved</strong></p>
+                {% endif %}
+            {% else %}
+                <p class="muted">No draft yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top: 24px;">
+        <h2>Committed Scenes</h2>
+        {% for scene in committed_scenes %}
+            <div style="margin-bottom: 20px;">
+                <p class="muted">{{ scene.created_at }}</p>
+                <pre>{{ scene.text }}</pre>
+            </div>
+        {% empty %}
+            <p class="muted">No committed scenes yet.</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+</body>
+</html>
