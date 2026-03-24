@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <h1>Create a Character</h1>
+
+<button onclick="window.location.href='{% url 'cast_page' %}'">Back to Cast</button>
+
+    <form method="post" action="{% url 'create_character_submit' %}">
+        {% csrf_token %}
+        <label for="name">Name:</label><br>
+        <input type="text" id="name" name="name" required><br><br>
+
+        <label for="description">Description:</label><br>
+        <textarea id="description" name="description" required></textarea><br><br>
+
+        <button type="submit">Create Character</button>
+</body>
+</html>

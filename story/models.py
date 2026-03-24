@@ -36,3 +36,11 @@ class CommittedScene(models.Model):
 
     def __str__(self):
         return f"CommittedScene {self.id} for {self.world.name}"
+
+class Character(models.Model):
+    world = models.ForeignKey(World, on_delete=models.CASCADE, related_name="characters")
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default="")
+
+    def __str__(self):
+        return f"{self.name} in {self.world.name}"

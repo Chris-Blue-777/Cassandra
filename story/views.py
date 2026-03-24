@@ -1,11 +1,14 @@
+from urllib import request
+
 from django.shortcuts import render, redirect, get_object_or_404
-from .models import World, SceneState, Proposal, CommittedScene
+from .models import World, SceneState, Proposal, CommittedScene, Character
+from .cassandra import call_cassandra, call_cassandra_revision
 
 def fake_cassandra(world, scene_state, user_input):
 
     draft = (
         f"[World: {World.name}]\n\n"
-        f"You entered:\n{user_input}\n\n"
+        f"You:\n{user_input}\n\n"
         f"Cassandra draft:\n"
         f"the scene continues from {scene_state.location or 'an unspecified location'}, "
         f"With the current cast reaction to the new input."
@@ -39,7 +42,7 @@ def scene_page(request):
             "active_world": None,
             "proposal": None,
             "committed_scenes": [],
-            "scene_state_": None,
+            "scene_state": None,
             "error": "No worlds exist yet. Create one in Django admin.",
         })
     scene_state, _ = SceneState.objects.get_or_create(
@@ -94,7 +97,17 @@ def generate_draft(request):
     if not user_input:
         return redirect("scene_page")
 
-    result = fake_cassandra(active_world, scene_state, user_input)
+    try:
+        result = call_cassandra(active_world, scene_state, user_input)
+    except Exception as e:
+        return render(request, "story/scene_page.html", {
+            "worlds": World.objects.all().order_by("name"),
+            "active_world": active_world,
+            "proposal": active_world.proposals.order_by("-created_at").first(),
+            "committed_scenes": active_world.committed_scenes.order_by("-created_at")[:10],
+            "scene_state": scene_state,
+            "error": f"Cassandra error: {e}",
+    })
 
     Proposal.objects.create(
         world=active_world,
@@ -129,6 +142,98 @@ def approve_draft(reuest, proposal_id):
     scene_state.save()
 
     return redirect("scene_page")
+
+def cast_page(request):
+    active_world = World.objects.filter(is_active=True).first()
+    if not active_world:
+        return render(request, "story/cast_page.html", {
+            "characters": [],
+            "error": "No active world. Please create and activate a world in Django admin.",
+        })
+    characters = active_world.characters.order_by("name")
+    return render(request, "story/cast_page.html", {
+        "characters": characters,
+    })
+
+def character_creation_form(request):
+
+    return render(request, "story/create_character.html")
+
+def create_character(request):
+    if request.method != "POST":
+        return redirect("create_character")
+
+    active_world = World.objects.filter(is_active=True).first()
+    if not active_world:
+        return redirect("create_character")
+
+    name = request.POST.get("name", "").strip()
+    description = request.POST.get("description", "").strip()
+
+    if not name:
+        return render(request, "story/create_character.html", {
+            "error": "Character name cannot be empty.",
+        })
+
+    Character.objects.create(
+        world=active_world,
+        name=name,
+        description=description,
+    )
+
+    return redirect("cast_page")
+
+def revise_draft(request, proposal_id):
+    if request.method != "POST":
+        return redirect("scene_page")
+
+    proposal = get_object_or_404(Proposal, id=proposal_id)
+    active_world = proposal.world
+
+    revision_feedback = request.POST.get("revision_feedback", "").strip()
+
+    if not revision_feedback:
+        return redirect("scene_page")
+
+    scene_state, _ = SceneState.objects.get_or_create(
+        world=active_world,
+        defaults={
+            "location": "opening scene",
+            "cast_json": [],
+            "pending_intents_json": [],
+        }
+        )
+    try:
+        result = call_cassandra_revision(
+            world=active_world,
+            scene_state=scene_state,
+            current_draft=proposal.draft,
+            revision_feedback=revision_feedback,
+            )
+
+    except Exception as e:
+            worlds = World.objects.all().order_by("name")
+            latest_proposal = active_world.proposals.order_by("-created_at").first()
+            committed_scenes = active_world.committed_scenes.order_by("-created_at")[:10]
+
+            return render(request, "story/scene_page.html", {
+                "worlds": worlds,
+                "active_world": active_world,
+                "proposal": latest_proposal,
+                "committed_scenes": committed_scenes,
+                "scene_state": scene_state,
+                "error": f"Cassandra error during revision: {type(e).__name__}: {e}",
+            })
+
+    proposal.draft = result["draft"]
+    proposal.scene_state_update_json = result["scene_state_update"]
+    proposal.pending_intents_json = result["pending_intents"]
+    proposal.save()
+
+    return redirect("scene_page")
+
+
+
 
 
 # Create your views here.

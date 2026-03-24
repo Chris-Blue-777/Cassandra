@@ -70,6 +70,8 @@
         </form>
     </div>
 
+    <button onclick="window.location.href='{% url 'cast_page' %}'">View Cast</button>
+
     <div class="container">
         <div class="panel">
             <h2>Scene Input</h2>
@@ -106,6 +108,11 @@
                 <p class="muted">No draft yet.</p>
             {% endif %}
         </div>
+        <form method="post" action="{% url 'revise_draft' proposal.id %}">
+            {% csrf_token %}
+            <textarea name="revision_feedback" placeholder="Enter revision guidance..."></textarea>
+            <button type="submit">Revise Draft</button>
+        </form>
     </div>
 
     <div class="panel" style="margin-top: 24px;">
