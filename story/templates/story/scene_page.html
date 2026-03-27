@@ -1,131 +1,510 @@
+{% load debug_extras %}
+{% load static %}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>Cassandra Prototype</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 30px;
-            background: #f7f7f7;
-        }
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
-        }
-        .panel {
-            background: white;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-        }
-        textarea {
-            width: 100%;
-            min-height: 140px;
-            margin-top: 10px;
-            margin-bottom: 10px;
-        }
-        select, button {
-            padding: 8px 12px;
-            margin-top: 8px;
-        }
-        pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            background: #fafafa;
-            padding: 12px;
-            border: 1px solid #eee;
-        }
-        .muted {
-            color: #666;
-            font-size: 0.95em;
-        }
-    </style>
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}">
 </head>
 <body>
-    <h1>Cassandra Prototype</h1>
+<div class="app-shell">
 
     {% if error %}
-        <p style="color:red;">{{ error }}</p>
+        <div class="error-box">{{ error }}</div>
     {% endif %}
 
     {% if active_world %}
-    <div class="panel" style="margin-bottom: 24px;">
-        <h2>Active World</h2>
-        <p><strong>{{ active_world.name }}</strong></p>
-        <p class="muted">{{ active_world.description }}</p>
-
-        <form method="post" action="{% url 'switch_world' %}">
-            {% csrf_token %}
-            <label for="world_id">Switch world:</label>
-            <select name="world_id" id="world_id">
-                {% for world in worlds %}
-                    <option value="{{ world.id }}" {% if world.id == active_world.id %}selected{% endif %}>
-                        {{ world.name }}
-                    </option>
-                {% endfor %}
-            </select>
-            <button type="submit">Switch</button>
-        </form>
-    </div>
-
-    <button onclick="window.location.href='{% url 'cast_page' %}'">View Cast</button>
-
-    <div class="container">
-        <div class="panel">
-            <h2>Scene Input</h2>
-            <form method="post" action="{% url 'generate_draft' %}">
-                {% csrf_token %}
-                <textarea name="user_input" placeholder="Enter the next scene beat..."></textarea>
-                <button type="submit">Generate Draft</button>
-            </form>
-
-            <h3>Current Scene State</h3>
-            {% if scene_state %}
-                <p><strong>Location:</strong> {{ scene_state.location }}</p>
-                <pre>{{ scene_state.cast_json }}</pre>
-                <p><strong>Pending Intents:</strong></p>
-                <pre>{{ scene_state.pending_intents_json }}</pre>
-            {% endif %}
-        </div>
-
-        <div class="panel">
-            <h2>Latest Draft</h2>
-            {% if proposal %}
-                <p class="muted">Created: {{ proposal.created_at }}</p>
-                <pre>{{ proposal.draft }}</pre>
-
-                {% if not proposal.is_approved %}
-                <form method="post" action="{% url 'approve_draft' proposal.id %}">
-                    {% csrf_token %}
-                    <button type="submit">Approve Draft</button>
-                </form>
-                {% else %}
-                    <p><strong>Approved</strong></p>
-                {% endif %}
-            {% else %}
-                <p class="muted">No draft yet.</p>
-            {% endif %}
-        </div>
-        <form method="post" action="{% url 'revise_draft' proposal.id %}">
-            {% csrf_token %}
-            <textarea name="revision_feedback" placeholder="Enter revision guidance..."></textarea>
-            <button type="submit">Revise Draft</button>
-        </form>
-    </div>
-
-    <div class="panel" style="margin-top: 24px;">
-        <h2>Committed Scenes</h2>
-        {% for scene in committed_scenes %}
-            <div style="margin-bottom: 20px;">
-                <p class="muted">{{ scene.created_at }}</p>
-                <pre>{{ scene.text }}</pre>
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">World</span>
+                <strong>{{ active_world.name }}</strong>
             </div>
-        {% empty %}
-            <p class="muted">No committed scenes yet.</p>
-        {% endfor %}
+            {% if scene_state and scene_state.cast_json %}
+    <div class="header-cast">
+        <span class="topbar-label">Cast</span>
+
+        <div class="header-cast-pills">
+            {% for slug, member in scene_state.cast_json.items %}
+                <div class="cast-pill-wrap">
+                    <span class="cast-pill">
+                        {{ slug }}
+                    </span>
+
+                    <div class="cast-hover-card">
+                        <div class="cast-hover-name">{{ slug }}</div>
+
+                        {% if member.position %}
+                            <div class="cast-hover-line">
+                                <span class="label">Role:</span> {{ member.position }}
+                            </div>
+                        {% endif %}
+
+                        {% if member.presence %}
+                            <div class="cast-hover-line">
+                                <span class="label">Presence:</span> {{ member.presence }}
+                            </div>
+                        {% endif %}
+
+                        {% if member.description %}
+                            <div class="cast-hover-line">
+                                {{ member.description }}
+                            </div>
+                        {% endif %}
+
+                        {% if member.goal %}
+                            <div class="cast-hover-line">
+                                <span class="label">Goal:</span> {{ member.goal }}
+                            </div>
+                        {% endif %}
+
+                        {% if member.notes %}
+                            <div class="cast-hover-line">
+                                <span class="label">Notes:</span> {{ member.notes }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
     </div>
+{% endif %}
+
+            <form method="post" action="{% url 'switch_world' %}" class="topbar-form">
+                {% csrf_token %}
+                <select name="world_id">
+                    {% for world in worlds %}
+                        <option value="{{ world.id }}" {% if world.id == active_world.id %}selected{% endif %}>
+                            {{ world.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="secondary">Switch</button>
+            </form>
+        </div>
+
+        <div class="topbar-right">
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'cast_page' %}'">
+                Cast
+            </button>
+        </div>
+    </div>
+
+    <div class="workspace">
+
+        <!-- LEFT PANEL -->
+<div class="panel side-panel">
+    {% if scene_state %}
+        <div class="scene-location-line">
+            {{ scene_state.location|default:"No location set." }}
+        </div>
+    {% else %}
+        <div class="scene-location-line muted">No location set.</div>
     {% endif %}
+
+    {% if narrative_memories %}
+    <div class="panel-block">
+        <h3>Narrative Memory</h3>
+
+        <ul class="status-list">
+            {% for memory in narrative_memories %}
+                <li class="status-row">
+                    <div class="status-row-sub">
+                        {{ memory.content|linebreaksbr }}
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+    <!-- CURRENT PENDING INTENTS (NON-PROPOSAL) -->
+    {% if scene_state and scene_state.pending_intents_json %}
+        <div class="panel-block">
+            <h3>Pending Intents</h3>
+
+            <ul class="status-list">
+                {% for slug, intent in scene_state.pending_intents_json.items %}
+                    <li class="status-row">
+                        <div class="status-row-main">
+                            <div class="status-row-title">{{ slug }}</div>
+                            <div class="status-row-sub">
+                                {{ intent.purpose }} → {{ intent.next }}
+                                <div class="intent-tone">{{ intent.tone }}</div>
+                            </div>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    {% if proposal and not proposal.is_approved %}
+
+    <!-- CAST DIFF -->
+    <div class="panel-block">
+        <h3>Cast</h3>
+
+        <div class="comparison-columns comparison-split compact-diff">
+
+            <!-- BEFORE -->
+            <div class="comparison-column">
+                <div class="comparison-header">
+                    <span class="status-icon">👥</span>
+                    <span>Before</span>
+                </div>
+
+                {% if proposal.prior_scene_state_json.cast %}
+                    <div class="compact-list">
+                        {% for slug, member in proposal.prior_scene_state_json.cast.items %}
+                            <div class="compact-row">
+                                <strong>{{ slug }}</strong>
+                                {% if member.position %} · {{ member.position }}{% endif %}
+                                {% if member.presence %}
+                                    <span class="presence-inline {{ member.presence }}">
+                                        {{ member.presence }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state">No cast listed.</div>
+                {% endif %}
+            </div>
+
+            <!-- AFTER -->
+            <div class="comparison-column">
+                <div class="comparison-header">
+                    <span class="status-icon">👥</span>
+                    <span>After</span>
+                </div>
+
+                {% if proposal.proposed_scene_state_json.cast %}
+                    <div class="compact-list">
+                        {% for slug, member in proposal.proposed_scene_state_json.cast.items %}
+                            <div class="compact-row">
+                                <strong>{{ slug }}</strong>
+                                {% if member.position %} · {{ member.position }}{% endif %}
+                                {% if member.presence %}
+                                    <span class="presence-inline {{ member.presence }}">
+                                        {{ member.presence }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state">No cast listed.</div>
+                {% endif %}
+            </div>
+
+        </div>
+    </div>
+
+
+
+        <!-- PENDING INTENTS DIFF -->
+        <div class="panel-block">
+            <h3>Pending Intents</h3>
+            <div class="status-card comparison-card">
+                <div class="comparison-columns comparison-split">
+
+                    <div class="comparison-column">
+                        <div class="comparison-header">
+                            <span class="status-icon">🎯</span>
+                            <span>Before</span>
+                        </div>
+
+                        {% if proposal.prior_scene_state_json.pending_intents %}
+                            <ul class="status-list">
+                                {% for slug, intent in proposal.prior_scene_state_json.pending_intents.items %}
+                                    <li class="status-row">
+                                        <div class="status-row-main">
+                                            <div class="status-row-title">{{ slug }}</div>
+                                            <div class="status-row-sub">
+                                                <strong>Purpose:</strong> {{ intent.purpose }}<br>
+                                                <strong>Next:</strong> {{ intent.next }}
+                                                <div class="intent-tone">{{ intent.tone }}</div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="empty-state">No pending intents.</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="comparison-column">
+                        <div class="comparison-header">
+                            <span class="status-icon">🎯</span>
+                            <span>After</span>
+                        </div>
+
+                        {% if proposal.proposed_scene_state_json.pending_intents %}
+                            <ul class="status-list">
+                                {% for slug, intent in proposal.proposed_scene_state_json.pending_intents.items %}
+                                    <li class="status-row">
+                                        <div class="status-row-main">
+                                            <div class="status-row-title">{{ slug }}</div>
+                                            <div class="status-row-sub">
+                                                <strong>Purpose:</strong> {{ intent.purpose }}<br>
+                                                <strong>Next:</strong> {{ intent.next }}
+                                                <div class="intent-tone">{{ intent.tone }}</div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <div class="empty-state">No pending intents.</div>
+                        {% endif %}
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- REVISION / INTERPRETATION (UNCHANGED) -->
+        {% if proposal.revision_change_summary or proposal.revision_intent_summary or proposal.editors_craft_memory_json %}
+            <div class="panel-block">
+                <h3>Revision Interpretation</h3>
+
+                {% if proposal.revision_change_summary %}
+                    <p><span class="label">Change Summary:</span></p>
+                    <div class="text-box">
+                        {{ proposal.revision_change_summary|linebreaksbr }}
+                    </div>
+                {% endif %}
+
+                {% if proposal.revision_intent_summary %}
+                    <p style="margin-top: 14px;"><span class="label">Inferred Editorial Intent:</span></p>
+                    <div class="text-box">
+                        {{ proposal.revision_intent_summary|linebreaksbr }}
+                    </div>
+                {% endif %}
+
+                {% if proposal.editors_craft_memory_json %}
+                    <p style="margin-top: 14px;"><span class="label">Editor’s Craft Memory:</span></p>
+                    <div class="text-box">
+                        {% for item in proposal.editors_craft_memory_json %}
+                            {{ item }}{% if not forloop.last %}<br><br>{% endif %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- RAW (UNCHANGED) -->
+        <div class="panel-block">
+            <details>
+                <summary>Raw Proposal Data</summary>
+
+                <h4>Scene State Update</h4>
+                <pre>{{ proposal.scene_state_update_json|prettyjson }}</pre>
+
+                <h4>Prior Scene State</h4>
+                <pre>{{ proposal.prior_scene_state_json|prettyjson }}</pre>
+
+                <h4>Proposed Scene State</h4>
+                <pre>{{ proposal.proposed_scene_state_json|prettyjson }}</pre>
+
+                <h4>Pending Intents</h4>
+                <pre>{{ proposal.pending_intents_json|prettyjson }}</pre>
+
+                <h4>Revision Change Summary</h4>
+                <pre>{{ proposal.revision_change_summary|default:""|prettyjson }}</pre>
+
+                <h4>Revision Intent Summary</h4>
+                <pre>{{ proposal.revision_intent_summary|default:""|prettyjson }}</pre>
+
+                <h4>Editor’s Craft Memory</h4>
+                <pre>{{ proposal.editors_craft_memory_json|default:""|prettyjson }}</pre>
+            </details>
+        </div>
+
+    {% endif %}
+</div>
+
+        <!-- RIGHT PANEL / CHAT -->
+        <div class="chat-panel-shell">
+
+            <div class="chat-window compact-chat-window">
+                <div class="chat-thread chat-history" id="chat-history">
+                    {% for scene in committed_scenes reversed %}
+                        <div class="chat-bubble chat-bubble-user">
+                            <div class="chat-meta">
+                                <span class="chat-speaker">You</span>
+                            </div>
+                            <div class="chat-message-body">
+                                {{ scene.user_text|linebreaksbr }}
+                            </div>
+                        </div>
+
+                        <div class="chat-bubble chat-bubble-cassandra">
+                            <div class="chat-meta">
+                                <span class="chat-speaker">Cassandra</span>
+                            </div>
+                            <div class="chat-message-body">
+                                {{ scene.cassandra_text|linebreaksbr }}
+                            </div>
+                        </div>
+                    {% endfor %}
+
+                    {% if proposal %}
+                        <div class="chat-bubble chat-bubble-user">
+                            <div class="chat-meta">
+                                <span class="chat-speaker">You</span>
+                            </div>
+                            <div class="chat-message-body">
+                                {{ proposal.user_input|linebreaksbr }}
+                            </div>
+                        </div>
+
+                        <div class="chat-bubble chat-bubble-cassandra">
+                            <div class="chat-meta">
+                                <span class="chat-speaker">Cassandra</span>
+                                {% if proposal.is_approved %}
+                                    <span class="chat-state-tag">Approved</span>
+                                {% else %}
+                                    <span class="chat-state-tag">Pending</span>
+                                {% endif %}
+                            </div>
+
+                            <div id="draft-readonly-{{ proposal.id }}" class="chat-message-body">
+                                {{ proposal.draft|linebreaksbr }}
+
+                                {% if not proposal.is_approved %}
+                                    <div class="chat-actions">
+                                        <button type="button" class="secondary" onclick="openEditMode('{{ proposal.id }}')">
+                                            Edit
+                                        </button>
+                                        <form method="post" action="{% url 'approve_draft' proposal.id %}">
+                                            {% csrf_token %}
+                                            <button type="submit">Approve</button>
+                                        </form>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            {% if not proposal.is_approved %}
+                            <div id="draft-edit-{{ proposal.id }}" class="chat-edit-body" style="display: none; margin-top: 6px;">
+                                <form method="post" action="{% url 'revise_draft' proposal.id %}">
+                                    {% csrf_token %}
+
+                                    <label for="edited_draft_{{ proposal.id }}"><strong>Edit Draft</strong></label>
+                                    <textarea
+                                        id="edited_draft_{{ proposal.id }}"
+                                        name="edited_draft"
+                                        rows="12"
+                                    >{{ proposal.draft }}</textarea>
+
+                                    <label for="revision_feedback_{{ proposal.id }}"><strong>Revision Guidance</strong></label>
+                                    <textarea
+                                        id="revision_feedback_{{ proposal.id }}"
+                                        name="revision_feedback"
+                                        rows="6"
+                                        placeholder="Describe what should change in the draft, scene state, or pending intents."
+                                    ></textarea>
+
+                                    <div class="chat-actions">
+                                        <button type="submit" class="secondary">Submit Revision</button>
+                                        <button type="button" onclick="closeEditMode('{{ proposal.id }}')">Cancel</button>
+                                    </div>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="chat-bubble chat-bubble-cassandra">
+                            <div class="chat-meta">
+                                <span class="chat-speaker">Cassandra</span>
+                            </div>
+                            <div class="chat-message-body">
+                                <span class="muted">No proposal yet. Send the next scene beat to generate one.</span>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="chat-composer-box">
+                    <form method="post" action="{% url 'generate_draft' %}">
+                        {% csrf_token %}
+                        <textarea name="user_input" placeholder="Enter the next scene beat..."></textarea>
+                        <div class="chat-composer-actions">
+                            <button type="submit">Send</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {% endif %}
+</div>
+
+<script>
+function openEditMode(proposalId) {
+    const readOnlyBlock = document.getElementById(`draft-readonly-${proposalId}`);
+    const editBlock = document.getElementById(`draft-edit-${proposalId}`);
+
+    if (readOnlyBlock) {
+        readOnlyBlock.style.display = "none";
+    }
+    if (editBlock) {
+        editBlock.style.display = "block";
+    }
+}
+
+function closeEditMode(proposalId) {
+    const readOnlyBlock = document.getElementById(`draft-readonly-${proposalId}`);
+    const editBlock = document.getElementById(`draft-edit-${proposalId}`);
+
+    if (editBlock) {
+        editBlock.style.display = "none";
+    }
+    if (readOnlyBlock) {
+        readOnlyBlock.style.display = "block";
+    }
+}
+
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const container = document.getElementById("chat-history");
+
+    if (!container) return;
+
+    // Always start at bottom on load
+    container.scrollTop = container.scrollHeight;
+
+    let isUserNearBottom = true;
+
+    // Detect if user scrolls away
+    container.addEventListener("scroll", () => {
+        const threshold = 80; // px from bottom
+        const distanceFromBottom =
+            container.scrollHeight - container.scrollTop - container.clientHeight;
+
+        isUserNearBottom = distanceFromBottom < threshold;
+    });
+
+    // Observe new messages being added
+    const observer = new MutationObserver(() => {
+        if (isUserNearBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+    });
+
+    observer.observe(container, {
+        childList: true,
+        subtree: true,
+    });
+});
+</script>
 </body>
 </html>
