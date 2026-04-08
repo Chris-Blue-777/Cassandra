@@ -1,9 +1,7 @@
 import json
-import os
+import re
 from openai import OpenAI
 from .models import NarrativeMemory, CommittedScene
-from .Wanda import build_turn_context, build_revision_context
-from .MissPots.proposals import _normalize_structured_output
 
 client = OpenAI()
 
@@ -12,13 +10,8 @@ You are Cassandra, the narrative orchestrator of a multi-character interactive s
 
 Your job:
 - Write a reviewable draft for the user
-- Return a lean scene state update
-- Return pending intents as a top-level field
 
 Rules:
-- Keep state minimal and non-contradictory
-- Do not maintain large off-screen lists
-- pending_intents must be a top-level field
 - Output must match the provided schema exactly
 
 You may be given recent narrative memories and recent committed scenes from the active world.
@@ -33,60 +26,8 @@ CASSANDRA_SCHEMA = {
         "draft": {
             "type": "string"
         },
-        "scene_state_update": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "location": {
-                    "type": ["string", "null"]
-                },
-                "cast": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "slug": {
-                                "type": "string"
-                            },
-                            "presence": {
-                                "type": "string",
-                                "enum": ["active", "nearby"]
-                            },
-                            "position": {
-                                "type": ["string", "null"]
-                            }
-                        },
-                        "required": ["slug", "presence", "position"]
-                    }
-                }
-            },
-            "required": ["location", "cast"]
-        },
-        "pending_intents": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "slug": {
-                        "type": "string"
-                    },
-                    "purpose": {
-                        "type": "string"
-                    },
-                    "tone": {
-                        "type": "string"
-                    },
-                    "next": {
-                        "type": "string"
-                    }
-                },
-                "required": ["slug", "purpose", "tone", "next"]
-            }
-        }
     },
-    "required": ["draft", "scene_state_update", "pending_intents"]
+    "required": ["draft"]
 }
 
 CASSANDRA_REVISION_SCHEMA = {
@@ -108,66 +49,12 @@ CASSANDRA_REVISION_SCHEMA = {
                 "type": "string"
             }
         },
-        "scene_state_update": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "location": {
-                    "type": ["string", "null"]
-                },
-                "cast": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "slug": {
-                                "type": "string"
-                            },
-                            "presence": {
-                                "type": "string",
-                                "enum": ["active", "nearby"]
-                            },
-                            "position": {
-                                "type": ["string", "null"]
-                            }
-                        },
-                        "required": ["slug", "presence", "position"]
-                    }
-                }
-            },
-            "required": ["location", "cast"]
-        },
-        "pending_intents": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "slug": {
-                        "type": "string"
-                    },
-                    "purpose": {
-                        "type": "string"
-                    },
-                    "tone": {
-                        "type": "string"
-                    },
-                    "next": {
-                        "type": "string"
-                    }
-                },
-                "required": ["slug", "purpose", "tone", "next"]
-            }
-        }
     },
     "required": [
         "draft",
         "change_summary",
         "inferred_editorial_intent",
         "editors_craft_memory",
-        "scene_state_update",
-        "pending_intents"
     ]
 }
 # def build_cassandra_input(world, scene_state, user_input):
@@ -191,8 +78,6 @@ CASSANDRA_REVISION_SCHEMA = {
 
 
 def call_cassandra(payload):
-    print("CONTEXT TYPE:", type(payload))
-    print("CONTEXT:", payload)
     response = client.responses.create(
         model="gpt-5.4",
         instructions=CASSANDRA_SYSTEM_PROMPT,
@@ -211,15 +96,12 @@ def call_cassandra(payload):
         raise ValueError("Cassandra returned no output text")
 
     data = json.loads(response.output_text)
-    data = _normalize_structured_output(data)
 
     return data
 
 
 
 def call_cassandra_revision(context):
-    print("Revision Context:")
-    print(json.dumps(context, ensure_ascii=False, indent=2))
     REVISION_PROMPT = """
 You are Cassandra, the narrative orchestrator and editor of a multi-character interactive story.
 
@@ -230,12 +112,13 @@ You will receive a JSON payload containing:
 - current scene state
 - recent narrative memories
 - recent committed scenes
+- user_input
 - revision_mode
 - original_draft
 - revised_draft
 - revision_feedback
 
-There are two revision modes:
+There are three revision modes:
 
 1. interpret_user_edit
 Use this mode when the user directly edited the draft text.
@@ -247,8 +130,6 @@ In this mode:
 - Do NOT overwrite or replace revised_draft
 - Still return a draft field, but it should simply match revised_draft
 - Evaluate what the revised draft implies for:
-  - scene_state_update
-  - pending_intents
   - editors_craft_memory (narrative memory implications)
   - change_summary
   - inferred_editorial_intent
@@ -260,24 +141,54 @@ In this mode:
 - Freely revise and improve the prose
 - Return the rewritten prose in the draft field
 - Then evaluate what that rewritten draft implies for:
-  - scene_state_update
-  - pending_intents
   - editors_craft_memory (narrative memory implications)
   - change_summary
   - inferred_editorial_intent
 
+3. rewrite_from_scratch
+Use this mode when the user wants a substantially different attempt.
+If revision_mode is rewrite_from_scratch:
+- Treat revised_draft as a reference only, not something to preserve.
+- Treat original_draft as a rejected prior attempt, not as prose to preserve
+
+In this mode:
+- Do not preserve the wording, paragraph structure, or sequencing of the original draft.
+- Treat the original draft only as evidence of scene facts and prior interpretation.
+- Rebuild the prose from the ground up.
+- Preserve continuity and character integrity, but aim for a clearly distinct execution.
+- The new draft should feel like an alternate valid response to the same scene prompt, not a lightly edited variant.
+
 Requirements for editors_craft_memory:
-- Return 1–3 concise entries
-- Capture narrative meaning, emotional shifts, power dynamics, etc.
+- Return 1 to 3 concise entries
+- Capture narrative meaning, emotional shifts, power dynamics, or interpretive continuity
 
 Global rules:
 - Treat revision_feedback as editorial guidance, not in-world dialogue
 - Preserve continuity and character integrity
-- Keep scene_state_update and pending_intents consistent with the effective draft
 - In interpret_user_edit mode, the effective draft is revised_draft
 - In rewrite_based_on_feedback mode, the effective draft is the draft you generate
+- In rewrite_from_scratch mode, the effective draft is the new draft you generate
 - editors_craft_memory are provisional proposal-level implications only, not canon memories
 - Return valid JSON matching the schema exactly
+When revision_mode is rewrite_from_scratch:
+- maximize meaningful variation in structure, emphasis, pacing, and line choices
+
+The effective revised draft is:
+- revised_draft in interpret_user_edit mode
+- the new draft you generate in rewrite_based_on_feedback mode
+- the new draft you generate in rewrite_from_scratch mode
+
+Important:
+- user_input may establish scene facts, emotional pressure, addressees, or continuity constraints that the revised prose assumes without restating explicitly
+- If original_draft and revised prose differ, prefer the revised prose as the final editorial intent unless revision_feedback clearly indicates otherwise
+
+Additional rewrite_from_scratch guidance:
+- Do not perform a sentence-level edit pass over original_draft
+- Do not preserve the same paragraph count unless it happens naturally
+- Do not keep the same opening line pattern or closing beat by default
+- Prefer fresh construction over substitution
+- Write as though the user asked for "another real attempt at this scene"
+
     """
 
     response = client.responses.create(
@@ -297,229 +208,146 @@ Global rules:
     if not response.output_text:
         raise ValueError("Cassandra returned no output text during revision")
 
-    print("Revision Raw Response:")
-    print(response.output_text)
 
     data = json.loads(response.output_text)
-    data = _normalize_structured_output(data)
+    data = _normalize_revision_output(data)
 
     return data
 
 
-def extract_memory_from_scene(draft, user_input=None):
+def extract_memory_from_scene(world, draft, user_input=None):
+    recent_memories = list(
+        NarrativeMemory.objects.filter(world=world)
+        .order_by("-created_at")[:5]
+    )[::-1]
+
+    recent_scenes = list(
+        CommittedScene.objects.filter(world=world)
+        .order_by("-created_at")[:3]
+    )[::-1]
+
+    payload = {
+        "user_input": user_input or "",
+        "final_draft": draft or "",
+        "recent_memories": [m.content for m in recent_memories],
+        "recent_scenes": [s.combined_text for s in recent_scenes],
+    }
+
     prompt = f"""
-    Extract 1–2 important narrative memories from this scene.
+Extract 1–2 narrative memories from this scene.
 
-    Focus on:
-    - relationship shifts
-    - emotional significance
-    - tension or power dynamics
-    - meaningful decisions
+Narrative memories are short continuity-assist notes.
+They are not action trackers and not long-term lore storage.
 
-    Keep each memory concise and meaningful. Do not summarize everything - extract only what should persist.
+Their purpose is to preserve the scene's implied meaning for upcoming scenes:
+- emotional carryover
+- inferred motives or feelings
+- relationship implications
+- power shifts or tension dynamics
+- why a moment mattered
+- what subtext should remain active
 
-    User contribution:
-    {user_input}
+Focus on:
+- implications and emotional meaning
+- causes, pressures, and inferred significance
+- shifts in how characters now relate to or understand each other
 
-    Cassandra final draft:
-    {draft}
-    """
+Do not focus on:
+- unfinished physical actions
+- logistical next steps
+- explicit future intentions
+- surface recap of what literally happened
+- details already covered by pending intents
 
+Avoid creating a memory that merely repeats an existing recent memory unless this scene materially deepens or changes it.
+
+Recent narrative memories:
+{chr(10).join(f"- {m.content}" for m in recent_memories) if recent_memories else "- None"}
+
+Recent scenes:
+{chr(10).join(f"- {s.combined_text}" for s in recent_scenes) if recent_scenes else "- None"}
+
+User contribution:
+{user_input or ""}
+
+Cassandra final draft:
+{draft or ""}
+
+Return 1–2 concise narrative memories.
+Each one should capture interpretive continuity, not action continuity.
+"""
     response = client.responses.create(
         model="gpt-5.4",
-        input=prompt,
+        instructions=prompt,
+        input=json.dumps(payload, ensure_ascii=False, indent=2),
     )
 
     return response.output_text.strip()
 
-import json
-from openai import OpenAI
 
-client = OpenAI()
+# - do not reuse sentences from original_draft unless truly necessary for continuity
+# When revision_mode is rewrite_from_scratch:
+# - avoid reusing sentences from original_draft
+# - avoid preserving the same paragraph order unless necessary
+# - prefer meaningful variation in structure, emphasis, and delivery
+
+def normalize_for_revision_compare(text: str) -> str:
+    if not text:
+        return ""
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
 
 
-CAST_RESOLUTION_PROMPT = """
-You are a structured scene-state resolver.
+def materially_changed(original_draft: str, revised_draft: str) -> bool:
+    return normalize_for_revision_compare(original_draft) != normalize_for_revision_compare(revised_draft)
 
-Your job is to convert user input into an OBJECTIVE scene_state_update.
 
-You do NOT write prose.
-You do NOT apply character perspective.
-You do NOT invent or reinterpret story meaning.
+def choose_revision_mode(
+    original_draft: str,
+    revised_draft: str,
+    revision_feedback: str | None,
+    rewrite_from_scratch: bool = False,
+) -> str:
+    if rewrite_from_scratch:
+        return "rewrite_from_scratch"
 
-You ONLY:
-- resolve character references
-- determine scene state changes
-- output structured JSON
+    has_material_edit = materially_changed(original_draft, revised_draft)
+    has_feedback = bool(revision_feedback and revision_feedback.strip())
 
----
+    if has_material_edit:
+        return "interpret_user_edit"
 
-## CHARACTER RESOLUTION RULES
+    if has_feedback:
+        return "rewrite_based_on_feedback"
 
-You are given a character_registry.
+    return "rewrite_from_scratch"
 
-Each character has:
-- name
-- slug
-- description
 
-When the user refers to a character using:
-- name ("Kara")
-- pronouns ("her", "she")
-- relational phrases ("my girlfriend", "my ex-husband")
-- titles ("Dr. Vale")
-
-You MUST resolve that reference to the correct character using its slug.
-
-IMPORTANT:
-- ALWAYS use the slug, NEVER the name
-- ONLY use characters from character_registry
-- If multiple characters could match, OMIT instead of guessing
-- If uncertain, OMIT
-
----
-
-## TEMPORARY CHARACTER RULES
-
-If the user introduces a person NOT in the character_registry:
-
-- Create a temporary character
-- Use a unique key: "tmp_<role>_<number>"
-
-Examples:
-- tmp_bartender_1
-- tmp_guard_1
-
-Each temporary character MUST include:
-- "type": "temporary"
-- "label": short role name ("bartender", "guard")
-- "description": brief physical or contextual description
-- "presence": usually "active"
-
-Rules:
-- Temporary characters are scene-scoped
-- Do NOT replace or override real characters
-- Reuse an existing temporary character if it clearly refers to the same person in the current scene
-
----
-
-## SCENE STATE RULES
-
-You produce:
-
-scene_state_update:
-- "location" (string, if changed or clarified)
-- "cast" (object of characters currently present)
-
-Cast rules:
-- Keys MUST be character slugs or "tmp_*"
-- Values include at minimum:
-  - "presence": "active" or "nearby"
-  - "position": optional string describing where they are in the scene
-
-Do NOT include characters unless they are present or explicitly affected.
-
----
-
-## STRICT CONSTRAINTS
-
-- DO NOT output names — only slugs
-- DO NOT invent real characters
-- DO NOT guess if uncertain
-- DO NOT apply perspective or hide information
-- DO NOT include explanations
-- OUTPUT JSON ONLY
-
----
-
-## OUTPUT FORMAT
-
-{
-  "scene_state_update": {
-    "location": "...",
-    "cast": {
-        "<slug_or_tmp_key>": {
-            "presence": {
-                "type": "string",
-                "enum": ["active", "nearby"]
-            },
-            "position": {"type": "string"}
-        },
+def _normalize_revision_output(data):
+    if not isinstance(data, dict):
+        return {
+            "draft": "",
+            "change_summary": "",
+            "inferred_editorial_intent": "",
+            "editors_craft_memory": [],
         }
-    }
-  "pending_intents": {}
-}
-"""
 
+    memories = data.get("editors_craft_memory") or []
+    if not isinstance(memories, list):
+        memories = []
 
-def call_cassandra_cast_resolution(context):
-    """
-    Calls Cassandra to resolve character ownership and produce a clean scene_state_update.
-
-    context = {
-        "user_input": str,
-        "current_scene_state": dict,
-        "character_registry": list,
-        "recent_scenes": list (optional)
-    }
-    """
-
-    user_prompt = f"""
-INPUT:
-
-user_input:
-{json.dumps(context.get("user_input", ""), indent=2)}
-
-current_scene_state:
-{json.dumps(context.get("current_scene_state", {}), indent=2)}
-
-character_registry:
-{json.dumps(context.get("character_registry", []), indent=2)}
-
-recent_scenes:
-{json.dumps(context.get("recent_scenes", []), indent=2)}
-
----
-
-Produce the scene_state_update following all rules.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-5.4",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": CAST_RESOLUTION_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-
-    content = response.choices[0].message.content.strip()
-
-    # --- Safe JSON parse ---
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        # fallback: attempt to extract JSON block
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        parsed = json.loads(content[start:end])
-
-    # --- Ensure required structure ---
     return {
-        "scene_state_update": parsed.get("scene_state_update", {}),
-        "pending_intents": parsed.get("pending_intents", {}),
+        "draft": (data.get("draft") or "").strip(),
+        "change_summary": (data.get("change_summary") or "").strip(),
+        "inferred_editorial_intent": (data.get("inferred_editorial_intent") or "").strip(),
+        "editors_craft_memory": [
+            str(item).strip()
+            for item in memories
+            if str(item).strip()
+        ],
     }
-
-# def build_character_turn_context(world, scene_state, character, user_input=None):
-#     return {
-#         "active_world": world,
-#         "current_scene_state": scene_state,
-#         "character_self": character,
-#         "character_state": character.status_json,
-#         "character_memories": character.memory_json,
-#         "character_perceptions": character.
-#         "character_beliefs": ...,
-#         "recent_relevant_scenes": ...,
-#         "visible_cast": ...,
-#         "user_input": user_input or "",
-#     }

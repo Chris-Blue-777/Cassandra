@@ -23,15 +23,12 @@ class Proposal(models.Model):
     world = models.ForeignKey(World, on_delete=models.CASCADE, related_name="proposals")
     user_input = models.TextField()
     draft = models.TextField()
-    scene_state_update_json = models.JSONField(default=dict)
-    prior_scene_state_json = models.JSONField(default=dict)
-    proposed_scene_state_json = models.JSONField(default=dict)
-    pending_intents_json = models.JSONField(default=dict)
     editors_craft_memory_json = models.JSONField(default=list, blank=True)
     revision_change_summary = models.TextField(blank=True, default="")
     revision_intent_summary = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     is_approved = models.BooleanField(default=False)
+    character_authored_intents_json = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"Proposal {self.id} for {self.world.name}"
