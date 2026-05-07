@@ -1,3 +1,5 @@
+<!-- scene_page.html -->
+
 {% load debug_extras %}
 {% load static %}
 <!DOCTYPE html>
@@ -122,6 +124,54 @@
     </div>
 {% endif %}
 
+{% if relationship_rows %}
+<div class="panel-block">
+    <h3>Relationship Map</h3>
+
+    <ul class="status-list">
+        {% for row in relationship_rows %}
+            <li class="status-row">
+                <div class="status-row-main">
+                    <div class="status-row-title">
+                        {{ row.observer.name }} → {{ row.target.name }}
+                    </div>
+
+                    {% if row.summary %}
+                        <div class="status-row-sub">
+                            {{ row.summary }}
+                        </div>
+                    {% endif %}
+
+                    <div class="relationship-score-grid">
+                        {% for score in row.scores %}
+                            <div class="relationship-score">
+                                <span class="relationship-score-label">
+                                    {{ score.label }}
+                                </span>
+
+                                <span class="relationship-score-value">
+                                    {{ score.value|floatformat:2 }}
+                                </span>
+
+                                {% if score.delta > 0 %}
+                                    <span class="relationship-delta positive">
+                                        +{{ score.delta|floatformat:2 }}
+                                    </span>
+                                {% elif score.delta < 0 %}
+                                    <span class="relationship-delta negative">
+                                        {{ score.delta|floatformat:2 }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
     <!-- CURRENT PENDING INTENTS (NON-PROPOSAL) -->
     {% if scene_state and scene_state.pending_intents_json %}
         <div class="panel-block">
@@ -144,6 +194,86 @@
     {% endif %}
 
     {% if proposal and not proposal.is_approved %}
+
+    {% if proposal.character_contributions_json %}
+
+    <div class="panel-block">
+        <h3>Character Contributions</h3>
+        <div class="character-contribution-debug">
+        <div class="status-list">
+            {% for contribution in proposal.character_contributions_json %}
+                <div class="status-row">
+                    <div class="status-row-main">
+                        <div class="status-row-title">
+                            {% if contribution.slug %}
+                                {{ contribution.slug }}
+                            {% elif contribution.scene_contribution.slug %}
+                                {{ contribution.scene_contribution.slug }}
+                            {% else %}
+                                Unknown character
+                            {% endif %}
+                        </div>
+
+                        <div class="status-row-sub">
+                            {% if contribution.scene_contribution %}
+                                {% with c=contribution.scene_contribution %}
+                                    {% if c.attempted_action %}
+                                        <strong>Action:</strong> {{ c.attempted_action }}<br>
+                                    {% endif %}
+
+                                    {% if c.attempted_dialogue %}
+                                        <strong>Dialogue:</strong> “{{ c.attempted_dialogue }}”<br>
+                                    {% endif %}
+
+                                    {% if c.internal_intent %}
+                                        <strong>Intent:</strong> {{ c.internal_intent }}<br>
+                                    {% endif %}
+
+                                    {% if c.emotional_posture %}
+                                        <strong>Posture:</strong> {{ c.emotional_posture }}<br>
+                                    {% endif %}
+
+                                    {% if c.confidence %}
+                                        <strong>Confidence:</strong> {{ c.confidence }}<br>
+                                    {% endif %}
+
+                                    {% if c.target_slugs %}
+                                        <strong>Targets:</strong>
+                                        {{ c.target_slugs|join:", " }}<br>
+                                    {% endif %}
+
+                                    {% if c.interrupt_priority %}
+                                        <strong>Interrupt:</strong> {{ c.interrupt_priority }}<br>
+                                    {% endif %}
+
+                                    {% if c.required_visibility %}
+                                        <strong>Visibility:</strong> {{ c.required_visibility }}<br>
+                                    {% endif %}
+
+                                    {% if c.required_audibility %}
+                                        <strong>Audibility:</strong> {{ c.required_audibility }}<br>
+                                    {% endif %}
+                                {% endwith %}
+                            {% else %}
+                                <span class="empty-state">No scene contribution.</span>
+                            {% endif %}
+
+                            {% if contribution.authored_intent %}
+                                <div class="intent-tone">
+                                    Authored Intent: {{ contribution.authored_intent.purpose }}
+                                    {% if contribution.authored_intent.next %}
+                                        → {{ contribution.authored_intent.next }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    </div>
+{% endif %}
 
     <!-- CAST DIFF -->
     <div class="panel-block">
@@ -305,6 +435,9 @@
             <details>
                 <summary>Raw Proposal Data</summary>
 
+                <h4>Character Contributions</h4>
+                <pre>{{ proposal.character_contributions_json|prettyjson }}</pre>
+
                 <h4>Scene State Update</h4>
                 <pre>{{ proposal.scene_state_update_json|prettyjson }}</pre>
 
@@ -424,15 +557,6 @@
                                 </form>
                             </div>
                             {% endif %}
-                        </div>
-                    {% else %}
-                        <div class="chat-bubble chat-bubble-cassandra">
-                            <div class="chat-meta">
-                                <span class="chat-speaker">Cassandra</span>
-                            </div>
-                            <div class="chat-message-body">
-                                <span class="muted">No proposal yet. Send the next scene beat to generate one.</span>
-                            </div>
                         </div>
                     {% endif %}
                 </div>

@@ -1,3 +1,4 @@
+#views.py#
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import (
     World,
@@ -5,29 +6,67 @@ from .models import (
     Proposal,
     CommittedScene,
     Character,
+    CharacterProfile,
     NarrativeMemory,
+    CharacterPerception,
+    CharacterPerceptionChange,
     TempSceneState,
 )
 from .Cassandra import (
     call_cassandra,
     call_cassandra_revision,
-    extract_memory_from_scene,
+    extract_scene_aftermath,
     materially_changed,
-    choose_revision_mode
+    choose_revision_mode,
 )
 from .Wanda import (
     build_turn_context,
     build_revision_context,
     resolve_proposed_scene_state,
     serialize_scene_state,
-    collect_character_authored_intents,
-    resolve_intents,
-    resolve_approved_scene_state
 )
 from .MissPots.cast_tracker import (
     infer_scene_participants_and_positions,
+    _merge_alias_cache,
+    _valid_character_slugs
 )
+from .MissPots.characters import (
+    build_character_registry,
+    collect_character_contributions,
+    collect_character_authored_intents_from_contributions,
+    persist_character_experience_updates
+)
+from .forms import CharacterForm
 
+def normalize_intents(intents):
+    normalized = {}
+
+    if isinstance(intents, dict):
+        iterable = [
+            {"slug": slug, **payload}
+            for slug, payload in intents.items()
+            if isinstance(payload, dict)
+        ]
+    elif isinstance(intents, list):
+        iterable = intents
+    else:
+        iterable = []
+
+    for entry in iterable:
+        if not isinstance(entry, dict):
+            continue
+
+        slug = str(entry.get("slug") or "").strip()
+        if not slug:
+            continue
+
+        normalized[slug] = {
+            "purpose": str(entry.get("purpose") or "").strip(),
+            "tone": str(entry.get("tone") or "").strip(),
+            "next": str(entry.get("next") or "").strip(),
+        }
+
+    return normalized
 
 def scene_page(request):
     worlds = World.objects.all().order_by("name")
@@ -57,9 +96,63 @@ def scene_page(request):
         }
     )
 
-    latest_proposal = active_world.proposals.order_by("-created_at").first()
+    latest_proposal = (
+        active_world.proposals
+        .filter(is_approved=False)
+        .order_by("-created_at")
+        .first()
+    )
     committed_scenes = active_world.committed_scenes.order_by("-created_at")[:10]
     narrative_memories = active_world.narrative_memories.order_by("-created_at")[:2]
+
+    relationship_snapshots = (
+        CharacterPerception.objects
+        .filter(world=active_world)
+        .select_related("observer", "target")
+        .order_by("observer__name", "target__name")
+    )
+
+    relationship_rows = []
+
+    for perception in relationship_snapshots:
+        latest_change = (
+            CharacterPerceptionChange.objects
+            .filter(
+                world=active_world,
+                observer=perception.observer,
+                target=perception.target,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        relationship_rows.append({
+            "observer": perception.observer,
+            "target": perception.target,
+            "summary": perception.summary,
+            "scores": [
+                {
+                    "label": "Trust",
+                    "value": perception.trust,
+                    "delta": latest_change.trust_delta if latest_change else 0,
+                },
+                {
+                    "label": "Attraction",
+                    "value": perception.attraction,
+                    "delta": latest_change.attraction_delta if latest_change else 0,
+                },
+                {
+                    "label": "Fear",
+                    "value": perception.fear,
+                    "delta": latest_change.fear_delta if latest_change else 0,
+                },
+                {
+                    "label": "Resentment",
+                    "value": perception.resentment,
+                    "delta": latest_change.resentment_delta if latest_change else 0,
+                },
+            ],
+        })
 
     return render(request, "story/scene_page.html", {
         "worlds": worlds,
@@ -68,6 +161,7 @@ def scene_page(request):
         "committed_scenes": committed_scenes,
         "scene_state": scene_state,
         "narrative_memories": narrative_memories,
+        "relationship_rows": relationship_rows,
     })
 
 
@@ -104,21 +198,29 @@ def generate_draft(request):
     if not user_input:
         return redirect("scene_page")
 
-    character_authored_intents = collect_character_authored_intents(
+    player_character = Character.objects.filter(
         world=active_world,
-        scene_state=scene_state,
-        user_input=user_input,
-    )
+        is_player=True,
+        is_active=True,
+    ).first()
 
     try:
         participant_result = infer_scene_participants_and_positions(
             world=active_world,
             scene_state=scene_state,
-            user_input=user_input,
-            pov_slug=None,  # replace later when POV is wired in
+            scene_text=f"[User]\n{user_input}",
+            pov_slug=player_character.slug if player_character else None,
         )
 
         participant_update = participant_result.get("scene_state_update", {})
+        alias_update = participant_result.get("alias_cache_update", {})
+
+        valid_slugs = _valid_character_slugs(build_character_registry(active_world))
+        merged_alias_cache = _merge_alias_cache(
+            existing=scene_state.alias_cache_json,
+            update=alias_update,
+            valid_slugs=valid_slugs,
+        )
 
         # Build a temporary scene state for Cassandra using participant inference first.
         pre_draft_scene_state = resolve_proposed_scene_state(
@@ -131,16 +233,42 @@ def generate_draft(request):
             location=pre_draft_scene_state.get("location", ""),
             cast_json=pre_draft_scene_state.get("cast", {}),
             pending_intents_json=pre_draft_scene_state.get("pending_intents", {}),
+            alias_cache_json=merged_alias_cache,
         )
 
-        context = build_turn_context(active_world, temp_scene_state, user_input, character_authored_intents=character_authored_intents)
+        character_contributions = collect_character_contributions(
+            world=active_world,
+            scene_state=temp_scene_state,
+            user_input=user_input,
+        )
+
+        character_authored_intents = (
+            collect_character_authored_intents_from_contributions(
+                character_contributions
+            )
+        )
+
+        context = build_turn_context(
+            active_world,
+            temp_scene_state,
+            user_input,
+            character_authored_intents=character_authored_intents,
+            character_contributions=character_contributions,
+        )
+
         result = call_cassandra(context)
 
     except Exception as e:
+        print("DRAFT GENERATION ERROR:", type(e).__name__, e)
         return render(request, "story/scene_page.html", {
             "worlds": World.objects.all().order_by("name"),
             "active_world": active_world,
-            "proposal": active_world.proposals.order_by("-created_at").first(),
+            "proposal": (
+                active_world.proposals
+                .filter(is_approved=False)
+                .order_by("-created_at")
+                .first()
+            ),
             "committed_scenes": active_world.committed_scenes.order_by("-created_at")[:20],
             "scene_state": scene_state,
             "error": f"Draft generation error: {type(e).__name__}: {e}",
@@ -150,11 +278,22 @@ def generate_draft(request):
         world=active_world,
         user_input=user_input,
         draft=result["draft"],
+        scene_events_json=result.get("scene_events", []),
         character_authored_intents_json=character_authored_intents,
+        resolved_pending_intents_json=normalize_intents(
+            result.get("resolved_pending_intents", [])
+        ),
         is_approved=False,
         revision_change_summary=result.get("change_summary", ""),
         revision_intent_summary=result.get("inferred_editorial_intent", ""),
         editors_craft_memory_json=result.get("editors_craft_memory", []),
+        character_contributions_json=character_contributions,
+        proposed_scene_state_json={
+            **pre_draft_scene_state,
+            "alias_cache": merged_alias_cache,
+        },
+        scene_state_update_json=participant_update,
+        alias_cache_update_json=alias_update,
     )
 
     return redirect("scene_page")
@@ -182,51 +321,92 @@ def approve_draft(request, proposal_id):
     proposal.is_approved = True
     proposal.save()
 
-    combined_scene_text = f"""[User]
-    {proposal.user_input}
+    last_scene = (
+        CommittedScene.objects
+        .filter(world=world)
+        .order_by("-turn_number")
+        .first()
+    )
 
-    [Cassandra]
-    {proposal.draft}
-    """
+    next_turn_number = (last_scene.turn_number + 1) if last_scene else 1
 
     committed_scene = CommittedScene.objects.create(
         world=world,
+        turn_number=next_turn_number,
         user_text=proposal.user_input,
         cassandra_text=proposal.draft,
-        combined_text=combined_scene_text,
+        scene_events_json=proposal.scene_events_json or [],
     )
 
-    resolved_pending_intents = resolve_intents(
+    scene_text = (
+        f"[User]\n{proposal.user_input or ''}\n\n"
+        f"[Cassandra]\n{proposal.draft or ''}"
+    )
+
+    # Use the draft-time scene-state inference.
+    # Do NOT call MissPots again here.
+
+    first_pass_state = {
+        **(proposal.proposed_scene_state_json or {}),
+        "pending_intents": scene_state.pending_intents_json or {},
+    }
+    resolved_pending_intents = proposal.resolved_pending_intents_json or {}
+
+    final_resolved_state = {
+        **first_pass_state,
+        "pending_intents": resolved_pending_intents,
+    }
+
+    aftermath = extract_scene_aftermath(
         world=world,
-        scene_state=scene_state,
         user_input=proposal.user_input,
-        final_draft=proposal.draft,
-        character_authored_intents=proposal.character_authored_intents_json or {},
+        final_draft=committed_scene.cassandra_text,
+        resolved_scene_state=final_resolved_state,
+        scene_events=proposal.scene_events_json or [],
+        character_contributions=proposal.character_contributions_json or [],
+        character_registry=build_character_registry(world),
     )
 
-    resolved_state = resolve_approved_scene_state(
+    print(
+        "AFTERMATH COUNTS:",
+        "narrative_memories=", len(aftermath.get("narrative_memories", [])),
+        "character_experience_updates=", len(aftermath.get("character_experience_updates", [])),
+    )
+
+    for memory_text in aftermath.get("narrative_memories", []):
+        if memory_text:
+            NarrativeMemory.objects.create(
+                world=world,
+                content=memory_text,
+                source_scene=committed_scene,
+            )
+
+    aftermath_scene_state_update = aftermath.get("scene_state_update") or {}
+    aftermath_location = aftermath_scene_state_update.get("location")
+
+    if aftermath_location:
+        final_resolved_state["location"] = aftermath_location
+
+    persist_character_experience_updates(
         world=world,
-        scene_state=scene_state,
-        user_input=proposal.user_input,
-        final_draft=proposal.draft,
-        pending_intents=resolved_pending_intents,
-        pov_slug=None,
+        resolved_scene_state=final_resolved_state,
+        experience_updates=aftermath.get("character_experience_updates", []),
+        source_scene=committed_scene,
     )
 
-    narrative_memory = extract_memory_from_scene(
-        world=world,
-        user_input=proposal.user_input,
-        draft=committed_scene.cassandra_text,
+    scene_state.alias_cache_json = final_resolved_state.get(
+        "alias_cache",
+        scene_state.alias_cache_json,
     )
-    if narrative_memory:
-        NarrativeMemory.objects.create(
-            world=world,
-            content=narrative_memory
-        )
-
-    scene_state.location = resolved_state.get("location", scene_state.location)
-    scene_state.cast_json = resolved_state.get("cast", scene_state.cast_json)
-    scene_state.pending_intents_json = resolved_state.get("pending_intents", {})
+    scene_state.location = final_resolved_state.get(
+        "location",
+        scene_state.location,
+    )
+    scene_state.cast_json = final_resolved_state.get(
+        "cast",
+        scene_state.cast_json,
+    )
+    scene_state.pending_intents_json = resolved_pending_intents
     scene_state.save()
 
     return redirect("scene_page")
@@ -246,33 +426,34 @@ def cast_page(request):
 
 
 def character_creation_form(request):
+    if request.method == "POST":
+        form = CharacterForm(request.POST)
+        if form.is_valid():
+            character = form.save()
+            profile, _ = CharacterProfile.objects.get_or_create(
+                character=character,
+            )
 
-    return render(request, "story/create_character.html")
+            profile.summary = form.cleaned_data.get("profile_summary", "")
+            profile.archetype = form.cleaned_data.get("archetype", "")
+            profile.gender = form.cleaned_data.get("gender", "")
+            profile.pronouns_json = {
+                "subject": form.cleaned_data.get("pronoun_subject", ""),
+                "object": form.cleaned_data.get("pronoun_object", ""),
+                "possessive": form.cleaned_data.get("pronoun_possessive", ""),
+                "possessive_pronoun": form.cleaned_data.get("pronoun_possessive_pronoun", ""),
+                "reflexive": form.cleaned_data.get("pronoun_reflexive", ""),
+            }
+            profile.save()
 
+            return redirect("cast_page")
 
-def create_character(request):
-    if request.method != "POST":
-        return redirect("create_character")
+    else:
+        form = CharacterForm()
 
-    active_world = World.objects.filter(is_active=True).first()
-    if not active_world:
-        return redirect("create_character")
-
-    name = request.POST.get("name", "").strip()
-    description = request.POST.get("description", "").strip()
-
-    if not name:
-        return render(request, "story/create_character.html", {
-            "error": "Character name cannot be empty.",
-        })
-
-    Character.objects.create(
-        world=active_world,
-        name=name,
-        description=description,
-    )
-
-    return redirect("cast_page")
+    return render(request, "story/create_character.html", {
+        "form": form,
+    })
 
 
 def revise_draft(request, proposal_id):
@@ -339,7 +520,12 @@ def revise_draft(request, proposal_id):
 
     except Exception as e:
         worlds = World.objects.all().order_by("name")
-        latest_proposal = active_world.proposals.order_by("-created_at").first()
+        latest_proposal = (
+            active_world.proposals
+            .filter(is_approved=False)
+            .order_by("-created_at")
+            .first()
+        )
         committed_scenes = active_world.committed_scenes.order_by("-created_at")[:20]
 
         return render(request, "story/scene_page.html", {

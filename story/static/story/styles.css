@@ -53,8 +53,8 @@ html,
 body {
     margin: 0;
     padding: 0;
-    height: 100%;
-    overflow: hidden;
+    min-height: 100%;
+    overflow-x: hidden;
 }
 
 body {
@@ -162,11 +162,13 @@ label {
    ========================= */
 
 .app-shell {
-    height: 100vh;
+    min-height: 100vh;
+    height: auto;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
     padding: var(--space-4) var(--space-4) var(--space-4) 0;
+    overflow: visible;
 }
 
 .page-shell {
@@ -233,10 +235,13 @@ label {
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;
+    max-width: 100%;
+    height: calc(100vh - 96px);
     display: grid;
-    grid-template-columns: 444px minmax(0, 1fr);
-    justify-content: start;
+    grid-template-columns: minmax(280px, 444px) minmax(0, 1fr);
+    justify-content: stretch;
     gap: var(--space-4);
+    overflow: hidden;
 }
 
 .container {
@@ -263,6 +268,8 @@ label {
 .chat-panel-shell {
     min-height: 0;
     min-width: 0;
+    max-width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -795,6 +802,10 @@ details[open] summary::before {
 }
 
 .chat-window {
+    height: 100%;
+    max-height: 100%;
+    width: 100%;
+    min-width: 0;
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
@@ -975,12 +986,6 @@ details[open] summary::before {
     background: var(--panel);
 }
 
-.chat-composer-box {
-    flex: 0 0 auto;
-    border-top: 1px solid var(--border);
-    background: rgba(255, 253, 249, 0.95);
-    padding: 12px 14px 10px 14px;
-}
 
 .dark-mode .chat-composer-box {
     background: rgba(20, 20, 20, 0.95);
@@ -1047,13 +1052,6 @@ details[open] summary::before {
     .chat-bubble {
         max-width: 90%;
     }
-}
-
-.chat-panel-shell {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
 }
 
 /* =========================
@@ -1181,4 +1179,89 @@ details[open] summary::before {
         rgba(255,255,255,0.03),
         rgba(0,0,0,0.2)
     ), var(--panel);
+}
+
+.character-contribution-debug {
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+
+.chat-composer-box,
+.chat-composer-box form,
+.chat-composer-actions {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.chat-composer-box {
+    flex: 0 0 auto;
+}
+
+.chat-composer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.chat-composer-actions button {
+    flex: 0 0 auto;
+}
+
+.relationship-score-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    margin-top: 8px;
+}
+
+.relationship-score {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+}
+
+.relationship-score-label {
+    color: var(--muted);
+    min-width: 82px;
+}
+
+.relationship-score-value {
+    font-weight: 700;
+    color: var(--text);
+}
+
+.relationship-delta {
+    font-size: 0.74rem;
+    font-weight: 800;
+    border-radius: 999px;
+    padding: 2px 6px;
+    line-height: 1;
+}
+
+.relationship-delta.positive {
+    color: #237a3b;
+    background: #e4f3e8;
+    border: 1px solid #b7ddc0;
+}
+
+.relationship-delta.negative {
+    color: #9a2f28;
+    background: #f6e2df;
+    border: 1px solid #e2b5ae;
+}
+
+.dark-mode .relationship-delta.positive {
+    color: #8fe0a4;
+    background: rgba(58, 150, 86, 0.18);
+    border-color: rgba(143, 224, 164, 0.25);
+}
+
+.dark-mode .relationship-delta.negative {
+    color: #ee9a91;
+    background: rgba(180, 70, 60, 0.18);
+    border-color: rgba(238, 154, 145, 0.25);
 }
