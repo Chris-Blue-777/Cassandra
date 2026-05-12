@@ -115,6 +115,7 @@ class CharacterProfile(models.Model):  # pylint: disable=too-few-public-methods
     craft_notes_json = models.JSONField(default=dict, blank=True)
     background_json = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+    permabeliefs_json = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"Profile for {self.character.name}"
@@ -342,6 +343,18 @@ class CharacterBelief(models.Model):  # pylint: disable=too-few-public-methods
     Best practice is to treat this table as the atomic layer and the
     perception belief_json as an aggregate summary if both are kept.
     """
+    BELIEF_STATUS_TRANSIENT = "transient"
+    BELIEF_STATUS_REINFORCED = "reinforced"
+    BELIEF_STATUS_PROMOTED = "promoted"
+    BELIEF_STATUS_DISCARDED = "discarded"
+
+    BELIEF_STATUS_CHOICES = [
+        (BELIEF_STATUS_TRANSIENT, "Transient"),
+        (BELIEF_STATUS_REINFORCED, "Reinforced"),
+        (BELIEF_STATUS_PROMOTED, "Promoted"),
+        (BELIEF_STATUS_DISCARDED, "Discarded"),
+    ]
+
     world = models.ForeignKey(World, on_delete=models.CASCADE, related_name="character_beliefs")
     character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name="beliefs")
     subject_type = models.CharField(max_length=50, blank=True, default="")
@@ -356,6 +369,11 @@ class CharacterBelief(models.Model):  # pylint: disable=too-few-public-methods
         blank=True,
         on_delete=models.CASCADE,
         related_name="character_beliefs",
+    )
+    belief_status = models.CharField(
+        max_length=50,
+        choices=BELIEF_STATUS_CHOICES,
+        default=BELIEF_STATUS_TRANSIENT,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

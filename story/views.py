@@ -440,9 +440,24 @@ def character_creation_form(request):
             profile.pronouns_json = {
                 "subject": form.cleaned_data.get("pronoun_subject", ""),
                 "object": form.cleaned_data.get("pronoun_object", ""),
-                "possessive": form.cleaned_data.get("pronoun_possessive", ""),
-                "possessive_pronoun": form.cleaned_data.get("pronoun_possessive_pronoun", ""),
-                "reflexive": form.cleaned_data.get("pronoun_reflexive", ""),
+            }
+            profile.personality_json = {
+                "notes": form.cleaned_data.get("personality", "")
+            }
+            profile.permabeliefs_json = {
+                "notes": form.cleaned_data.get("permabeliefs", "")
+            }
+
+            profile.diction_json = {
+                "notes": form.cleaned_data.get("diction", "")
+            }
+
+            profile.craft_notes_json = {
+                "notes": form.cleaned_data.get("craft_notes", "")
+            }
+
+            profile.background_json = {
+                "notes": form.cleaned_data.get("background", "")
             }
             profile.save()
 
