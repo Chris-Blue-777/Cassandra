@@ -10,7 +10,8 @@ from .models import (
     CharacterState,
     CharacterPerception,
     CharacterBelief,
-    CharacterMemory)
+    CharacterMemory,
+    CharacterScene)
 
 admin.site.register(World)
 admin.site.register(SceneState)
@@ -23,4 +24,5 @@ admin.site.register(CharacterState)
 admin.site.register(CharacterPerception)
 admin.site.register(CharacterBelief)
 admin.site.register(CharacterMemory)
+admin.site.register(CharacterScene)
 # Register your models here.

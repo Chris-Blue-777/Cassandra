@@ -146,6 +146,7 @@ class SceneState(models.Model):  # pylint: disable=too-few-public-methods
     cast_json = models.JSONField(default=dict)
     pending_intents_json = models.JSONField(default=dict)
     alias_cache_json = models.JSONField(default=dict, blank=True)
+    topology_json = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"SceneState for {self.world.name}"
@@ -247,6 +248,7 @@ class CommittedScene(models.Model):  # pylint: disable=too-few-public-methods
     cassandra_text = models.TextField(blank=True, default="")
     scene_events_json = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    cassandra_aftermath_processed = models.BooleanField(default=False)
 
     class Meta:  # pylint: disable=missing-class-docstring
         # pylint: disable=too-few-public-methods
@@ -438,6 +440,79 @@ class CharacterPerceptionChange(models.Model):
         )
 
 
+class CharacterScene(models.Model):
+    world = models.ForeignKey("World", on_delete=models.CASCADE)
+    character = models.ForeignKey("Character", on_delete=models.CASCADE)
+    source_scene = models.ForeignKey(
+        "CommittedScene",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="character_scenes",
+    )
+
+    turn_number = models.IntegerField(default=0)
+    participation = models.CharField(max_length=64, blank=True, default="")
+
+    # What the character-agent knew/was at draft time.
+    local_scene_state_json = models.JSONField(default=dict, blank=True)
+    acting_character_snapshot_json = models.JSONField(default=dict, blank=True)
+
+    # What the character attempted during this scene.
+    scene_contribution_json = models.JSONField(default=dict, blank=True)
+    authored_intent_json = models.JSONField(default=dict, blank=True)
+    current_turn_reflection_json = models.JSONField(default=dict, blank=True)
+
+    # Convenience fields broken out from scene_contribution/current_turn_reflection.
+    attempted_action = models.TextField(blank=True, default="")
+    attempted_dialogue = models.TextField(blank=True, default="")
+    internal_intent = models.TextField(blank=True, default="")
+    emotional_posture = models.TextField(blank=True, default="")
+    active_pressure = models.TextField(blank=True, default="")
+    anticipated_consequence = models.TextField(blank=True, default="")
+
+    observed_focus_json = models.JSONField(default=list, blank=True)
+    beliefs_in_play_json = models.JSONField(default=list, blank=True)
+    memory_pressures_json = models.JSONField(default=list, blank=True)
+    proposed_effects_json = models.JSONField(default=list, blank=True)
+
+    target_slugs_json = models.JSONField(default=list, blank=True)
+    required_visibility = models.CharField(max_length=32, blank=True, default="")
+    required_audibility = models.CharField(max_length=32, blank=True, default="")
+    interrupt_priority = models.CharField(max_length=32, blank=True, default="")
+    body_motion = models.TextField(blank=True, default="")
+
+    # What Cassandra/scene-events determined this character experienced.
+    event_record_json = models.JSONField(default=dict, blank=True)
+    event_record_text = models.TextField(blank=True, default="")
+
+    # The character-agent's later subjective aftermath of this approved scene.
+    subjective_scene_text = models.TextField(blank=True, default="")
+    previous_scene_aftermath_json = models.JSONField(default=dict, blank=True)
+
+    memories_created_json = models.JSONField(default=list, blank=True)
+    state_update_json = models.JSONField(default=dict, blank=True)
+    perception_updates_json = models.JSONField(default=list, blank=True)
+    beliefs_created_json = models.JSONField(default=list, blank=True)
+
+    # Optional snapshots for historical inspection.
+    state_before_json = models.JSONField(default=dict, blank=True)
+    state_after_json = models.JSONField(default=dict, blank=True)
+
+    aftermath_processed = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["turn_number", "character__slug"]
+        indexes = [
+            models.Index(fields=["world", "character", "turn_number"]),
+            models.Index(fields=["source_scene", "character"]),
+            models.Index(fields=["aftermath_processed"]),
+        ]
+
+
 # pylint: disable=too-few-public-methods
 class CharacterStateChange(models.Model):
     """
@@ -522,6 +597,7 @@ class Proposal(models.Model):  # pylint: disable=too-few-public-methods
     alias_cache_update_json = models.JSONField(default=dict, blank=True)
     resolved_pending_intents_json = models.JSONField(default=dict, blank=True)
     resolved_character_experience_updates_json = models.JSONField(default=list, blank=True)
+    character_agent_debug_json = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return f"Proposal {self.id} for {self.world.name}"
@@ -539,6 +615,7 @@ class TempSceneState:
     cast_json: dict
     pending_intents_json: dict
     alias_cache_json: dict = field(default_factory=dict)
+    topology_json: dict = field(default_factory=dict)
 
 @dataclass
 class SceneEvent:

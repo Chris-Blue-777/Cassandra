@@ -8,10 +8,15 @@
 <body>
     <h1>Cast</h1>
     <ul>
-        {% for character in characters %}
-            <li><strong>{{ character.name }}</strong>: {{ character.description }}</li>
-        {% endfor %}
-    </ul>
+    {% for character in characters %}
+        <li>
+            <strong>{{ character.name }}</strong>: {{ character.description }}
+            <a href="{% url 'character_edit_form' character.id %}">
+                Edit
+            </a>
+        </li>
+    {% endfor %}
+</ul>
     <button onclick="window.location.href='{% url 'create_character' %}'">Add a Character</button>
     <button onclick="window.location.href='{% url 'scene_page' %}'">Back to Scene</button>
 

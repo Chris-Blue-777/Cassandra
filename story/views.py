@@ -11,6 +11,7 @@ from .models import (
     CharacterPerception,
     CharacterPerceptionChange,
     TempSceneState,
+    CharacterScene,
 )
 from .Cassandra import (
     call_cassandra,
@@ -34,7 +35,11 @@ from .MissPots.characters import (
     build_character_registry,
     collect_character_contributions,
     collect_character_authored_intents_from_contributions,
-    persist_character_experience_updates
+    collect_single_character_experience_updates,
+    persist_character_experience_updates,
+    build_character_event_record_text,
+    apply_character_contribution_to_scene,
+    character_state_snapshot,
 )
 from .forms import CharacterForm
 
@@ -68,6 +73,28 @@ def normalize_intents(intents):
 
     return normalized
 
+
+def find_character_contribution(character_contributions, slug):
+    for contribution in character_contributions or []:
+        if not isinstance(contribution, dict):
+            continue
+
+        if contribution.get("slug") == slug:
+            return contribution
+
+        if contribution.get("scene_contribution", {}).get("slug") == slug:
+            scene_contribution = contribution.get("scene_contribution") or {}
+            scene_contribution["authored_intent"] = (
+                contribution.get("authored_intent") or {}
+            )
+            scene_contribution["current_turn_reflection"] = (
+                contribution.get("current_turn_reflection") or {}
+            )
+            return scene_contribution
+
+    return {}
+
+
 def scene_page(request):
     worlds = World.objects.all().order_by("name")
     active_world = World.objects.filter(is_active=True).first()
@@ -93,17 +120,24 @@ def scene_page(request):
             "location": "opening scene",
             "cast_json": {},
             "pending_intents_json": {},
+            "alias_cache_json": {},
+            "topology_json": {},
         }
     )
 
     latest_proposal = (
         active_world.proposals
-        .filter(is_approved=False)
         .order_by("-created_at")
         .first()
     )
     committed_scenes = active_world.committed_scenes.order_by("-created_at")[:10]
     narrative_memories = active_world.narrative_memories.order_by("-created_at")[:2]
+    character_scenes = (
+        CharacterScene.objects
+        .filter(world=active_world)
+        .select_related("character", "source_scene")
+        .order_by("-turn_number", "character__name")[:30]
+    )
 
     relationship_snapshots = (
         CharacterPerception.objects
@@ -112,24 +146,36 @@ def scene_page(request):
         .order_by("observer__name", "target__name")
     )
 
+    latest_committed_scene = (
+        CommittedScene.objects
+        .filter(world=active_world)
+        .order_by("-turn_number")
+        .first()
+    )
+
     relationship_rows = []
 
     for perception in relationship_snapshots:
-        latest_change = (
-            CharacterPerceptionChange.objects
-            .filter(
-                world=active_world,
-                observer=perception.observer,
-                target=perception.target,
+        latest_change = None
+
+        if latest_committed_scene:
+            latest_change = (
+                CharacterPerceptionChange.objects
+                .filter(
+                    world=active_world,
+                    observer=perception.observer,
+                    target=perception.target,
+                    source_scene=latest_committed_scene,
+                )
+                .order_by("-created_at")
+                .first()
             )
-            .order_by("-created_at")
-            .first()
-        )
 
         relationship_rows.append({
             "observer": perception.observer,
             "target": perception.target,
             "summary": perception.summary,
+            "has_recent_change": latest_change is not None,
             "scores": [
                 {
                     "label": "Trust",
@@ -162,6 +208,7 @@ def scene_page(request):
         "scene_state": scene_state,
         "narrative_memories": narrative_memories,
         "relationship_rows": relationship_rows,
+        "character_scenes": character_scenes,
     })
 
 
@@ -191,6 +238,8 @@ def generate_draft(request):
             "location": "opening scene",
             "cast_json": {},
             "pending_intents_json": {},
+            "alias_cache_json": {},
+            "topology_json": {},
         }
     )
 
@@ -203,6 +252,16 @@ def generate_draft(request):
         is_player=True,
         is_active=True,
     ).first()
+
+    pending_cassandra_aftermath_scene = (
+        CommittedScene.objects
+        .filter(
+            world=active_world,
+            cassandra_aftermath_processed=False,
+        )
+        .order_by("turn_number")
+        .first()
+    )
 
     try:
         participant_result = infer_scene_participants_and_positions(
@@ -234,18 +293,32 @@ def generate_draft(request):
             cast_json=pre_draft_scene_state.get("cast", {}),
             pending_intents_json=pre_draft_scene_state.get("pending_intents", {}),
             alias_cache_json=merged_alias_cache,
+            topology_json={
+                "narrative_frame": pre_draft_scene_state.get("narrative_frame", {}),
+                "spaces": pre_draft_scene_state.get("spaces", {}),
+            },
         )
 
-        character_contributions = collect_character_contributions(
+        character_contributions, character_agent_debug = collect_character_contributions(
             world=active_world,
             scene_state=temp_scene_state,
             user_input=user_input,
+            include_debug=True,
         )
 
         character_authored_intents = (
             collect_character_authored_intents_from_contributions(
                 character_contributions
             )
+        )
+        pending_cassandra_aftermath_scene = (
+            CommittedScene.objects
+            .filter(
+                world=active_world,
+                cassandra_aftermath_processed=False,
+            )
+            .order_by("turn_number")
+            .first()
         )
 
         context = build_turn_context(
@@ -254,9 +327,32 @@ def generate_draft(request):
             user_input,
             character_authored_intents=character_authored_intents,
             character_contributions=character_contributions,
+            pending_previous_cassandra_aftermath=pending_cassandra_aftermath_scene,
         )
 
         result = call_cassandra(context)
+
+        previous_aftermath = result.get("previous_scene_aftermath") or {}
+        source_scene_id = previous_aftermath.get("source_scene_id")
+
+        if source_scene_id:
+            pending_scene = CommittedScene.objects.filter(
+                id=source_scene_id,
+                world=active_world,
+                cassandra_aftermath_processed=False,
+            ).first()
+
+            if pending_scene:
+                for memory_text in previous_aftermath.get("narrative_memories", []):
+                    if memory_text:
+                        NarrativeMemory.objects.create(
+                            world=active_world,
+                            content=memory_text,
+                            source_scene=pending_scene,
+                        )
+
+                pending_scene.cassandra_aftermath_processed = True
+                pending_scene.save()
 
     except Exception as e:
         print("DRAFT GENERATION ERROR:", type(e).__name__, e)
@@ -294,6 +390,7 @@ def generate_draft(request):
         },
         scene_state_update_json=participant_update,
         alias_cache_update_json=alias_update,
+        character_agent_debug_json=character_agent_debug,
     )
 
     return redirect("scene_page")
@@ -315,6 +412,8 @@ def approve_draft(request, proposal_id):
             "location": "opening scene",
             "cast_json": {},
             "pending_intents_json": {},
+            "alias_cache_json": {},
+            "topology_json": {},
         }
     )
 
@@ -336,11 +435,7 @@ def approve_draft(request, proposal_id):
         user_text=proposal.user_input,
         cassandra_text=proposal.draft,
         scene_events_json=proposal.scene_events_json or [],
-    )
-
-    scene_text = (
-        f"[User]\n{proposal.user_input or ''}\n\n"
-        f"[Cassandra]\n{proposal.draft or ''}"
+        cassandra_aftermath_processed=False,
     )
 
     # Use the draft-time scene-state inference.
@@ -357,56 +452,164 @@ def approve_draft(request, proposal_id):
         "pending_intents": resolved_pending_intents,
     }
 
-    aftermath = extract_scene_aftermath(
+    # aftermath = extract_scene_aftermath(
+    #     world=world,
+    #     user_input=proposal.user_input,
+    #     final_draft=committed_scene.cassandra_text,
+    #     resolved_scene_state=final_resolved_state,
+    #     scene_events=proposal.scene_events_json or [],
+    #     character_contributions=proposal.character_contributions_json or [],
+    #     character_registry=build_character_registry(world),
+    # )
+
+    # print(
+    #     "AFTERMATH COUNTS:",
+    #     "narrative_memories=", len(aftermath.get("narrative_memories", [])),
+    # )
+
+    # for memory_text in aftermath.get("narrative_memories", []):
+    #     if memory_text:
+    #         NarrativeMemory.objects.create(
+    #             world=world,
+    #             content=memory_text,
+    #             source_scene=committed_scene,
+    #         )
+
+    # aftermath_scene_state_update = aftermath.get("scene_state_update") or {}
+    # aftermath_location = aftermath_scene_state_update.get("location")
+
+    # if aftermath_location:
+    #     final_resolved_state["location"] = aftermath_location
+
+    # character_experience_updates = collect_single_character_experience_updates(
+    #     world=world,
+    #     resolved_scene_state=final_resolved_state,
+    #     final_draft=committed_scene.cassandra_text,
+    #     scene_events=committed_scene.scene_events_json or [],
+    #     character_contributions=proposal.character_contributions_json or [],
+    # )
+
+    # print(
+    #     "PER-CHARACTER EXPERIENCE COUNTS:",
+    #     "updates=",
+    #     len(character_experience_updates),
+    # )
+
+    # persist_character_experience_updates(
+    #     world=world,
+    #     resolved_scene_state=final_resolved_state,
+    #     experience_updates=character_experience_updates,
+    #     source_scene=committed_scene,
+    # )
+
+    active_characters = Character.objects.filter(
         world=world,
-        user_input=proposal.user_input,
-        final_draft=committed_scene.cassandra_text,
-        resolved_scene_state=final_resolved_state,
-        scene_events=proposal.scene_events_json or [],
-        character_contributions=proposal.character_contributions_json or [],
-        character_registry=build_character_registry(world),
+        is_active=True,
     )
 
-    print(
-        "AFTERMATH COUNTS:",
-        "narrative_memories=", len(aftermath.get("narrative_memories", [])),
-        "character_experience_updates=", len(aftermath.get("character_experience_updates", [])),
-    )
+    cast = final_resolved_state.get("cast", {}) if isinstance(final_resolved_state, dict) else {}
 
-    for memory_text in aftermath.get("narrative_memories", []):
-        if memory_text:
-            NarrativeMemory.objects.create(
-                world=world,
-                content=memory_text,
-                source_scene=committed_scene,
+    for character in active_characters:
+        cast_entry = cast.get(character.slug, {}) if isinstance(cast, dict) else {}
+
+        event_record_text = build_character_event_record_text(
+            character_slug=character.slug,
+            resolved_scene_state=final_resolved_state,
+            scene_events=committed_scene.scene_events_json or [],
+            character_contributions=proposal.character_contributions_json or [],
+        )
+
+        perceived_events = [
+            event
+            for event in (committed_scene.scene_events_json or [])
+            if isinstance(event, dict)
+            and (
+                character.slug in (event.get("perceived_by") or [])
+                or event.get("actor_slug") == character.slug
+                or character.slug in (event.get("target_slugs") or [])
+            )
+        ]
+
+        event_record_json = {
+            "cast_entry": cast_entry,
+            "scene_events_perceived_by_character": perceived_events,
+        }
+
+        character_scene, _ = CharacterScene.objects.update_or_create(
+            character=character,
+            source_scene=committed_scene,
+            defaults={
+                "world": world,
+                "turn_number": committed_scene.turn_number,
+
+                "event_record_text": event_record_text,
+                "event_record_json": event_record_json,
+
+                "subjective_scene_text": "",
+                "participation": cast_entry.get("presence", ""),
+                "aftermath_processed": False,
+
+                "local_scene_state_json": cast_entry,
+                "acting_character_snapshot_json": {
+                    "slug": character.slug,
+                    "name": character.name,
+                    "is_player": character.is_player,
+                    "description": character.description or "",
+                },
+                "state_before_json": character_state_snapshot(character),
+                "state_after_json": {},
+            },
+        )
+
+        contribution = find_character_contribution(
+            proposal.character_contributions_json or [],
+            character.slug,
+        )
+
+        apply_character_contribution_to_scene(character_scene, contribution)
+        character_scene.save()
+
+        print("CHARACTER SCENES AFTER APPROVAL:")
+
+        for cs in CharacterScene.objects.filter(
+            world=world,
+            source_scene=committed_scene,
+        ).select_related("character").order_by("character__slug"):
+            print(
+                "CHARACTER SCENE ROW:",
+                "id=", cs.id,
+                "turn=", cs.turn_number,
+                "character=", cs.character.slug,
+                "processed=", cs.aftermath_processed,
+                "subjective=", repr(cs.subjective_scene_text),
+                "event_record=", repr((cs.event_record_text or "")[:120]),
             )
 
-    aftermath_scene_state_update = aftermath.get("scene_state_update") or {}
-    aftermath_location = aftermath_scene_state_update.get("location")
+    scene_state.location = final_resolved_state.get(
+        "location",
+        scene_state.location,
+    )
 
-    if aftermath_location:
-        final_resolved_state["location"] = aftermath_location
+    scene_state.cast_json = final_resolved_state.get(
+        "cast",
+        scene_state.cast_json,
+    )
 
-    persist_character_experience_updates(
-        world=world,
-        resolved_scene_state=final_resolved_state,
-        experience_updates=aftermath.get("character_experience_updates", []),
-        source_scene=committed_scene,
+    scene_state.topology_json = {
+        "narrative_frame": final_resolved_state.get("narrative_frame", {}),
+        "spaces": final_resolved_state.get("spaces", {}),
+    }
+
+    scene_state.pending_intents_json = final_resolved_state.get(
+        "pending_intents",
+        scene_state.pending_intents_json,
     )
 
     scene_state.alias_cache_json = final_resolved_state.get(
         "alias_cache",
         scene_state.alias_cache_json,
     )
-    scene_state.location = final_resolved_state.get(
-        "location",
-        scene_state.location,
-    )
-    scene_state.cast_json = final_resolved_state.get(
-        "cast",
-        scene_state.cast_json,
-    )
-    scene_state.pending_intents_json = resolved_pending_intents
+
     scene_state.save()
 
     return redirect("scene_page")
@@ -424,42 +627,74 @@ def cast_page(request):
         "characters": characters,
     })
 
+def _profile_notes(payload):
+    if not isinstance(payload, dict):
+        return ""
+
+    return payload.get("notes", "")
+
+
+def _save_character_profile_from_form(character, form):
+    profile, _ = CharacterProfile.objects.get_or_create(
+        character=character,
+    )
+
+    profile.summary = form.cleaned_data.get("profile_summary", "")
+    profile.archetype = form.cleaned_data.get("archetype", "")
+    profile.gender = form.cleaned_data.get("gender", "")
+
+    profile.pronouns_json = {
+        "subject": form.cleaned_data.get("pronoun_subject", ""),
+        "object": form.cleaned_data.get("pronoun_object", ""),
+    }
+
+    profile.personality_json = {
+        "notes": form.cleaned_data.get("personality", "")
+    }
+
+    profile.permabeliefs_json = {
+        "notes": form.cleaned_data.get("permabeliefs", "")
+    }
+
+    profile.diction_json = {
+        "notes": form.cleaned_data.get("diction", "")
+    }
+
+    profile.craft_notes_json = {
+        "notes": form.cleaned_data.get("craft_notes", "")
+    }
+
+    profile.background_json = {
+        "notes": form.cleaned_data.get("background", "")
+    }
+
+    profile.save()
+    return profile
+
+
+def _character_profile_initial(profile):
+    pronouns = profile.pronouns_json or {}
+
+    return {
+        "profile_summary": profile.summary,
+        "archetype": profile.archetype,
+        "gender": profile.gender,
+        "pronoun_subject": pronouns.get("subject", "they"),
+        "pronoun_object": pronouns.get("object", "them"),
+        "personality": _profile_notes(profile.personality_json),
+        "permabeliefs": _profile_notes(profile.permabeliefs_json),
+        "diction": _profile_notes(profile.diction_json),
+        "craft_notes": _profile_notes(profile.craft_notes_json),
+        "background": _profile_notes(profile.background_json),
+    }
 
 def character_creation_form(request):
     if request.method == "POST":
         form = CharacterForm(request.POST)
+
         if form.is_valid():
             character = form.save()
-            profile, _ = CharacterProfile.objects.get_or_create(
-                character=character,
-            )
-
-            profile.summary = form.cleaned_data.get("profile_summary", "")
-            profile.archetype = form.cleaned_data.get("archetype", "")
-            profile.gender = form.cleaned_data.get("gender", "")
-            profile.pronouns_json = {
-                "subject": form.cleaned_data.get("pronoun_subject", ""),
-                "object": form.cleaned_data.get("pronoun_object", ""),
-            }
-            profile.personality_json = {
-                "notes": form.cleaned_data.get("personality", "")
-            }
-            profile.permabeliefs_json = {
-                "notes": form.cleaned_data.get("permabeliefs", "")
-            }
-
-            profile.diction_json = {
-                "notes": form.cleaned_data.get("diction", "")
-            }
-
-            profile.craft_notes_json = {
-                "notes": form.cleaned_data.get("craft_notes", "")
-            }
-
-            profile.background_json = {
-                "notes": form.cleaned_data.get("background", "")
-            }
-            profile.save()
+            _save_character_profile_from_form(character, form)
 
             return redirect("cast_page")
 
@@ -468,6 +703,34 @@ def character_creation_form(request):
 
     return render(request, "story/create_character.html", {
         "form": form,
+        "is_editing": False,
+    })
+
+def character_edit_form(request, character_id):
+    character = get_object_or_404(Character, id=character_id)
+    profile, _ = CharacterProfile.objects.get_or_create(
+        character=character,
+    )
+
+    if request.method == "POST":
+        form = CharacterForm(request.POST, instance=character)
+
+        if form.is_valid():
+            character = form.save()
+            _save_character_profile_from_form(character, form)
+
+            return redirect("cast_page")
+
+    else:
+        form = CharacterForm(
+            instance=character,
+            initial=_character_profile_initial(profile),
+        )
+
+    return render(request, "story/create_character.html", {
+        "form": form,
+        "character": character,
+        "is_editing": True,
     })
 
 
@@ -486,13 +749,26 @@ def revise_draft(request, proposal_id):
             "location": "opening scene",
             "cast_json": {},
             "pending_intents_json": {},
+            "alias_cache_json": {},
+            "topology_json": {},
         }
     )
-    original_draft = proposal.draft
+    original_draft = proposal.draft or ""
     edited_draft = request.POST.get("edited_draft", "").strip()
     revision_feedback = request.POST.get("revision_feedback", "").strip()
-    text_changed = materially_changed(original_draft, edited_draft)
     rewrite_from_scratch = request.POST.get("rewrite_from_scratch") == "true"
+
+    if not edited_draft and not rewrite_from_scratch:
+        return render(request, "story/scene_page.html", {
+            "worlds": World.objects.all().order_by("name"),
+            "active_world": active_world,
+            "proposal": proposal,
+            "committed_scenes": active_world.committed_scenes.order_by("-created_at")[:20],
+            "scene_state": scene_state,
+            "error": "Revision error: edited draft cannot be empty.",
+        })
+
+    text_changed = materially_changed(original_draft, edited_draft)
 
     if not text_changed and not revision_feedback and not rewrite_from_scratch:
         return redirect("scene_page")
@@ -504,7 +780,7 @@ def revise_draft(request, proposal_id):
         rewrite_from_scratch=rewrite_from_scratch,
     )
 
-    effective_revised_draft = edited_draft or original_draft
+    effective_revised_draft = edited_draft if edited_draft else original_draft
 
     try:
         context = build_revision_context(
@@ -516,15 +792,151 @@ def revise_draft(request, proposal_id):
             revision_feedback=revision_feedback,
             revision_mode=revision_mode,
             character_authored_intents=proposal.character_authored_intents_json or {},
+            character_contributions=proposal.character_contributions_json or [],
         )
+
+        if revision_mode in {"rewrite_from_scratch", "rewrite_based_on_feedback"}:
+            try:
+                player_character = Character.objects.filter(
+                    world=active_world,
+                    is_player=True,
+                    is_active=True,
+                ).first()
+
+                participant_result = infer_scene_participants_and_positions(
+                    world=active_world,
+                    scene_state=scene_state,
+                    scene_text=f"[User]\n{proposal.user_input}",
+                    pov_slug=player_character.slug if player_character else None,
+                )
+
+                participant_update = participant_result.get("scene_state_update", {})
+                alias_update = participant_result.get("alias_cache_update", {})
+
+                valid_slugs = _valid_character_slugs(
+                    build_character_registry(active_world)
+                )
+
+                merged_alias_cache = _merge_alias_cache(
+                    existing=scene_state.alias_cache_json,
+                    update=alias_update,
+                    valid_slugs=valid_slugs,
+                )
+
+                pre_draft_scene_state = resolve_proposed_scene_state(
+                    current_state=serialize_scene_state(scene_state),
+                    scene_state_update=participant_update,
+                    pending_intents=scene_state.pending_intents_json,
+                )
+
+                temp_scene_state = TempSceneState(
+                    location=pre_draft_scene_state.get("location", ""),
+                    cast_json=pre_draft_scene_state.get("cast", {}),
+                    pending_intents_json=pre_draft_scene_state.get("pending_intents", {}),
+                    alias_cache_json=merged_alias_cache,
+                    topology_json={
+                        "narrative_frame": pre_draft_scene_state.get("narrative_frame", {}),
+                        "spaces": pre_draft_scene_state.get("spaces", {}),
+                    },
+                )
+
+                character_contributions, character_agent_debug = collect_character_contributions(
+                    world=active_world,
+                    scene_state=temp_scene_state,
+                    user_input=proposal.user_input,
+                    revision_feedback=revision_feedback if revision_mode == "rewrite_based_on_feedback" else "",
+                    revision_mode=revision_mode,
+                    include_debug=True,
+                )
+
+                character_authored_intents = (
+                    collect_character_authored_intents_from_contributions(
+                        character_contributions
+                    )
+                )
+
+                context = build_turn_context(
+                    active_world,
+                    temp_scene_state,
+                    proposal.user_input,
+                    character_authored_intents=character_authored_intents,
+                    character_contributions=character_contributions,
+                )
+
+                if revision_mode == "rewrite_based_on_feedback":
+                    context["revision_context"] = {
+                        "mode": "rewrite_based_on_feedback",
+                        "feedback": revision_feedback,
+                    }
+
+                result = call_cassandra(context)
+
+                proposal.draft = result["draft"]
+                proposal.scene_events_json = result.get("scene_events", [])
+                proposal.character_authored_intents_json = character_authored_intents
+                proposal.resolved_pending_intents_json = normalize_intents(
+                    result.get("resolved_pending_intents", [])
+                )
+
+                proposal.character_contributions_json = character_contributions
+                proposal.character_agent_debug_json = character_agent_debug
+                proposal.proposed_scene_state_json = {
+                    **pre_draft_scene_state,
+                    "alias_cache": merged_alias_cache,
+                }
+                proposal.scene_state_update_json = participant_update
+                proposal.alias_cache_update_json = alias_update
+
+                proposal.revision_change_summary = (
+                    "Regenerated from scratch with fresh character-agent contributions."
+                )
+                proposal.revision_intent_summary = (
+                    revision_feedback
+                    or "Full regeneration requested; character agents were re-run."
+                )
+                proposal.editors_craft_memory_json = []
+
+                proposal.save()
+                return redirect("scene_page")
+
+            except Exception as e:
+                worlds = World.objects.all().order_by("name")
+                latest_proposal = (
+                    active_world.proposals
+                    .filter(is_approved=False)
+                    .order_by("-created_at")
+                    .first()
+                )
+                committed_scenes = active_world.committed_scenes.order_by("-created_at")[:20]
+
+                return render(request, "story/scene_page.html", {
+                    "worlds": worlds,
+                    "active_world": active_world,
+                    "proposal": latest_proposal,
+                    "committed_scenes": committed_scenes,
+                    "scene_state": scene_state,
+                    "error": f"Rewrite from scratch error: {type(e).__name__}: {e}",
+                })
 
         result = call_cassandra_revision(context)
 
-        # 🔹 Draft handling
         if revision_mode == "interpret_user_edit":
+            # User-authored edit is authoritative.
             proposal.draft = edited_draft
         else:
-            proposal.draft = result.get("draft", proposal.draft)
+            proposal.draft = result.get("draft") or proposal.draft
+
+        proposal.scene_events_json = result.get(
+            "scene_events",
+            proposal.scene_events_json or [],
+        )
+
+        proposal.resolved_pending_intents_json = normalize_intents(
+            result.get(
+                "resolved_pending_intents",
+                proposal.resolved_pending_intents_json or {},
+            )
+        )
 
         proposal.editors_craft_memory_json = result.get("editors_craft_memory", [])
         proposal.revision_change_summary = result.get("change_summary", "")

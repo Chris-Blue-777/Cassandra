@@ -107,6 +107,35 @@ def _serialize_recent_scenes(queryset):
         for i, s in enumerate(queryset, start=1)
     ]
 
+def _topology_from_scene_state(scene_state):
+    topology = getattr(scene_state, "topology_json", {}) or {}
+
+    if not isinstance(topology, dict):
+        topology = {}
+
+    return {
+        "narrative_frame": topology.get("narrative_frame", {}) or {},
+        "spaces": topology.get("spaces", {}) or {},
+    }
+
+
+def _build_narrative_scene_state(scene_state):
+    topology = _topology_from_scene_state(scene_state)
+
+    return {
+        "location": scene_state.location or "opening scene",
+
+        # New topology-aware fields.
+        "narrative_frame": topology["narrative_frame"],
+        "spaces": topology["spaces"],
+
+        # Global/narrator-level cast map.
+        # Individual character agents should get localized views elsewhere.
+        "cast": scene_state.cast_json or {},
+
+        "pending_intents": scene_state.pending_intents_json or {},
+    }
+
 
 def _base_context(world, scene_state):
     memories = list(
@@ -124,7 +153,7 @@ def _base_context(world, scene_state):
     return {
         "context_control": {
             "hard_constraints": [
-                "current_scene_state",
+                "narrative_scene_state",
                 "character_registry",
             ],
             "continuity_constraints": [
@@ -143,12 +172,11 @@ def _base_context(world, scene_state):
             "name": world.name,
             "description": world.description,
         },
-        "current_scene_state": {
-            "location": scene_state.location or "opening scene",
-            "cast": scene_state.cast_json or {},
-            "pending_intents": scene_state.pending_intents_json or {},
-            "alias_cache": scene_state.alias_cache_json or {},
-        },
+        "narrative_scene_state": _build_narrative_scene_state(scene_state),
+
+        # Temporary backward-compatible alias.
+        # Remove this later after all prompts/code stop referring to current_scene_state.
+        "current_scene_state": _build_narrative_scene_state(scene_state),
         "character_registry": character_registry,
         "recent_N_memories": [
             {"content": m.content}
@@ -163,11 +191,36 @@ def build_turn_context(
     user_input,
     character_authored_intents=None,
     character_contributions=None,
+    pending_previous_cassandra_aftermath=None,
 ):
     payload = _base_context(world, scene_state)
+
+    topology = getattr(scene_state, "topology_json", {}) or {}
+    if not isinstance(topology, dict):
+        topology = {}
+
     payload["user_input"] = user_input or ""
     payload["character_authored_intents"] = character_authored_intents or {}
     payload["character_contributions"] = character_contributions or []
+
+    payload["narrative_scene_state"] = {
+        "location": scene_state.location or "opening scene",
+        "narrative_frame": topology.get("narrative_frame", {}),
+        "spaces": topology.get("spaces", {}),
+        "cast": scene_state.cast_json or {},
+        "pending_intents": scene_state.pending_intents_json or {},
+    }
+    if pending_previous_cassandra_aftermath:
+        payload["pending_previous_cassandra_aftermath"] = {
+            "source_scene_id": pending_previous_cassandra_aftermath.id,
+            "turn_number": pending_previous_cassandra_aftermath.turn_number,
+            "user_text": pending_previous_cassandra_aftermath.user_text,
+            "cassandra_text": pending_previous_cassandra_aftermath.cassandra_text,
+            "scene_events": pending_previous_cassandra_aftermath.scene_events_json or [],
+        }
+    else:
+        payload["pending_previous_cassandra_aftermath"] = None
+
     return payload
 
 
@@ -196,8 +249,28 @@ def build_revision_context(
 
 
 def serialize_scene_state(scene_state):
+    if not scene_state:
+        return {
+            "location": "opening scene",
+            "narrative_frame": {},
+            "spaces": {},
+            "cast": {},
+            "pending_intents": {},
+            "alias_cache": {},
+        }
+
     return {
         "location": scene_state.location or "opening scene",
+        "narrative_frame": (
+            scene_state.topology_json.get("narrative_frame", {})
+            if isinstance(scene_state.topology_json, dict)
+            else {}
+        ),
+        "spaces": (
+            scene_state.topology_json.get("spaces", {})
+            if isinstance(scene_state.topology_json, dict)
+            else {}
+        ),
         "cast": scene_state.cast_json or {},
         "pending_intents": scene_state.pending_intents_json or {},
         "alias_cache": scene_state.alias_cache_json or {},
@@ -209,30 +282,28 @@ def serialize_scene_state(scene_state):
 # =========================================================
 
 def resolve_proposed_scene_state(current_state, scene_state_update, pending_intents):
-    proposed = deepcopy(current_state or {})
+    resolved = deepcopy(current_state or {})
 
-    old_location = proposed.get("location")
-    new_location = (scene_state_update or {}).get("location")
-    location_changed = bool(new_location and new_location != old_location)
+    if scene_state_update.get("location"):
+        resolved["location"] = scene_state_update["location"]
 
-    if new_location:
-        proposed["location"] = new_location
+    if scene_state_update.get("narrative_frame"):
+        resolved["narrative_frame"] = scene_state_update["narrative_frame"]
 
-    if "cast" in (scene_state_update or {}):
-        proposed["cast"] = merge_scene_cast(
-            proposed.get("cast", {}),
-            scene_state_update.get("cast", {}),
-            location_changed=location_changed,
-        )
-    if location_changed:
-        proposed["alias_cache"] = {
-            alias: slug
-            for alias, slug in (proposed.get("alias_cache") or {}).items()
-            if not str(slug).startswith("tmp_")
-        }
+    if scene_state_update.get("spaces"):
+        resolved["spaces"] = scene_state_update["spaces"]
 
-    proposed["pending_intents"] = pending_intents or {}
-    return proposed
+    existing_cast = resolved.get("cast") or {}
+    update_cast = scene_state_update.get("cast") or {}
+
+    resolved["cast"] = {
+        **existing_cast,
+        **update_cast,
+    }
+
+    resolved["pending_intents"] = pending_intents or {}
+
+    return resolved
 
 
 def merge_scene_cast(current_cast, cast_update, location_changed=False):
@@ -459,44 +530,44 @@ def resolve_approved_scene_state_from_update(
         pending_intents=pending_intents or {},
     )
 
-def resolve_approved_scene_state(
-    world,
-    scene_state,
-    user_input,
-    final_draft,
-    pending_intents,
-    pov_slug=None,
-):
-    """
-    Authoritative post-approval scene-state resolver.
+# def resolve_approved_scene_state(
+#     world,
+#     scene_state,
+#     user_input,
+#     final_draft,
+#     pending_intents,
+#     pov_slug=None,
+# ):
+#     """
+#     Authoritative post-approval scene-state resolver.
 
-    Responsibilities:
-    - ask Miss Pots to infer scene participants and location from the approved scene
-    - resolve those inferred facts against the current canonical scene state
-    - return the fully resolved new scene state dict
+#     Responsibilities:
+#     - ask Miss Pots to infer scene participants and location from the approved scene
+#     - resolve those inferred facts against the current canonical scene state
+#     - return the fully resolved new scene state dict
 
-    This is the scene-state equivalent of resolve_intents().
-    """
+#     This is the scene-state equivalent of resolve_intents().
+#     """
 
-    scene_text = (
-        f"[User]\n{user_input or ''}\n\n"
-        f"[Cassandra]\n{final_draft or ''}"
-    )
+#     scene_text = (
+#         f"[User]\n{user_input or ''}\n\n"
+#         f"[Cassandra]\n{final_draft or ''}"
+#     )
 
-    participant_result = infer_scene_participants_and_positions(
-        world=world,
-        scene_state=scene_state,
-        scene_text=scene_text,
-        pov_slug=pov_slug,
-    )
+#     participant_result = infer_scene_participants_and_positions(
+#         world=world,
+#         scene_state=scene_state,
+#         scene_text=scene_text,
+#         pov_slug=pov_slug,
+#     )
 
-    scene_state_update = participant_result.get("scene_state_update", {})
+#     scene_state_update = participant_result.get("scene_state_update", {})
 
-    return resolve_proposed_scene_state_from_update(
-        current_state=scene_state,
-        scene_state_update=scene_state_update,
-        pending_intents=pending_intents or {},
-    )
+#     return resolve_approved_scene_state_from_update(
+#         scene_state=scene_state,
+#         scene_state_update=scene_state_update,
+#         pending_intents=pending_intents or {},
+#     )
 
 
 # =========================================================

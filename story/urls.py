@@ -9,4 +9,9 @@ urlpatterns = [
     path("cast/", views.cast_page, name="cast_page"),
     path("create-character/", views.character_creation_form, name="create_character"),
     path("revise-draft/<int:proposal_id>/", views.revise_draft, name="revise_draft"),
+    path(
+    "characters/<int:character_id>/edit/",
+    views.character_edit_form,
+    name="character_edit_form",
+),
 ]

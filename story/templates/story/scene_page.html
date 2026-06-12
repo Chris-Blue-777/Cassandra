@@ -143,28 +143,34 @@
                     {% endif %}
 
                     <div class="relationship-score-grid">
-                        {% for score in row.scores %}
-                            <div class="relationship-score">
-                                <span class="relationship-score-label">
-                                    {{ score.label }}
-                                </span>
+    {% for score in row.scores %}
+        <div class="relationship-score">
+            <span class="relationship-score-label">
+                {{ score.label }}
+            </span>
 
-                                <span class="relationship-score-value">
-                                    {{ score.value|floatformat:2 }}
-                                </span>
+            <span class="relationship-score-value">
+                {{ score.value|floatformat:2 }}
+            </span>
 
-                                {% if score.delta > 0 %}
-                                    <span class="relationship-delta positive">
-                                        +{{ score.delta|floatformat:2 }}
-                                    </span>
-                                {% elif score.delta < 0 %}
-                                    <span class="relationship-delta negative">
-                                        {{ score.delta|floatformat:2 }}
-                                    </span>
-                                {% endif %}
-                            </div>
-                        {% endfor %}
-                    </div>
+            {% if score.delta > 0 %}
+                <span class="relationship-delta positive">
+                    +{{ score.delta|floatformat:2 }}
+                </span>
+            {% elif score.delta < 0 %}
+                <span class="relationship-delta negative">
+                    {{ score.delta|floatformat:2 }}
+                </span>
+            {% endif %}
+        </div>
+    {% endfor %}
+</div>
+
+{% if not row.has_recent_change %}
+    <div class="status-row-sub muted">
+        No changes.
+    </div>
+{% endif %}
                 </div>
             </li>
         {% endfor %}
@@ -252,6 +258,46 @@
 
                                     {% if c.required_audibility %}
                                         <strong>Audibility:</strong> {{ c.required_audibility }}<br>
+                                    {% endif %}
+
+                                    {% if c.body_motion %}
+                                        <strong>Body Motion:</strong> {{ c.body_motion }}<br>
+                                    {% endif %}
+
+                                    {% if c.observed_focus %}
+                                        <strong>Observed Focus:</strong>
+                                        <ul class="compact-debug-list">
+                                            {% for item in c.observed_focus %}
+                                                <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+
+                                    {% if c.beliefs_in_play %}
+                                        <strong>Beliefs in Play:</strong>
+                                        <ul class="compact-debug-list">
+                                            {% for item in c.beliefs_in_play %}
+                                                <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+
+                                    {% if c.memory_pressures %}
+                                        <strong>Memory Pressures:</strong>
+                                        <ul class="compact-debug-list">
+                                            {% for item in c.memory_pressures %}
+                                                <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+
+                                    {% if c.proposed_effects %}
+                                        <strong>Proposed Effects:</strong>
+                                        <ul class="compact-debug-list">
+                                            {% for item in c.proposed_effects %}
+                                                <li>{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
                                     {% endif %}
                                 {% endwith %}
                             {% else %}
@@ -578,6 +624,1124 @@
     {% endif %}
 </div>
 
+{% if proposal %}
+<section class="agent-debug-panel agent-reality-section">
+    <details open>
+        <summary>
+            <span class="section-title">Reality Inspector</span>
+            {% if proposal.character_agent_debug_json %}
+                <span class="section-subtitle">
+                    {{ proposal.character_agent_debug_json|length }} character-agent call{{ proposal.character_agent_debug_json|length|pluralize }}
+                    {% if proposal.is_approved %} · Approved{% else %} · Pending{% endif %}
+                </span>
+            {% endif %}
+        </summary>
+
+        <p class="debug-note">
+            Left side shows narrator/system truth. Right side shows what each character-agent received and returned.
+        </p>
+
+        {% if proposal.character_agent_debug_json %}
+            {% for item in proposal.character_agent_debug_json %}
+                {% with ctx=item.input_context out=item.output req=item.request %}
+                <details class="agent-debug-card">
+                    <summary class="agent-card-summary">
+                        <div>
+                            <strong>{{ item.name|default:item.slug }}</strong>
+                            <span class="agent-slug">({{ item.slug }})</span>
+                        </div>
+                        <div class="agent-model">
+                            {{ item.provider }} · {{ item.model }}
+                        </div>
+                    </summary>
+
+                    <div class="agent-reality-compare">
+
+                        <!-- LEFT: TRUE / NARRATOR REALITY -->
+                        <div class="truth-column">
+                            <h3>True / Narrator Reality</h3>
+
+                            <div class="agent-section">
+                                <h4>Narrative Frame</h4>
+
+                                {% if proposal.proposed_scene_state_json.narrative_frame %}
+                                    <dl class="agent-definition-list">
+                                        <dt>Summary Location</dt>
+                                        <dd>{{ proposal.proposed_scene_state_json.narrative_frame.summary_location|default:"—" }}</dd>
+
+                                        <dt>Camera Scope</dt>
+                                        <dd>{{ proposal.proposed_scene_state_json.narrative_frame.camera_scope|default:"—" }}</dd>
+
+                                        <dt>Active Spaces</dt>
+                                        <dd>
+                                            {% if proposal.proposed_scene_state_json.narrative_frame.active_space_ids %}
+                                                {{ proposal.proposed_scene_state_json.narrative_frame.active_space_ids|join:", " }}
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </dd>
+                                    </dl>
+                                {% else %}
+                                    <dl class="agent-definition-list">
+                                        <dt>Location</dt>
+                                        <dd>
+                                            {{ proposal.proposed_scene_state_json.location|default:scene_state.location|default:"—" }}
+                                        </dd>
+                                    </dl>
+                                {% endif %}
+                            </div>
+
+                            <div class="agent-section">
+                                <h4>Spaces</h4>
+
+                                {% if proposal.proposed_scene_state_json.spaces %}
+                                    <div class="space-card-grid">
+                                        {% for space_id, space in proposal.proposed_scene_state_json.spaces.items %}
+                                            <details class="mini-folder">
+                                                <summary>
+                                                    {{ space.label|default:space_id }}
+                                                    <span class="muted">({{ space.kind|default:"space" }})</span>
+                                                </summary>
+
+                                                <dl class="agent-definition-list">
+                                                    <dt>Description</dt>
+                                                    <dd>{{ space.description|default:"—" }}</dd>
+
+                                                    <dt>Occupants</dt>
+                                                    <dd>
+                                                        {% if space.occupants %}
+                                                            {{ space.occupants|join:", " }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </dd>
+
+                                                    <dt>Adjacent</dt>
+                                                    <dd>
+                                                        {% if space.adjacent_space_ids %}
+                                                            {{ space.adjacent_space_ids|join:", " }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </dd>
+
+                                                    <dt>Audible From</dt>
+                                                    <dd>
+                                                        {% if space.audible_space_ids %}
+                                                            {{ space.audible_space_ids|join:", " }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </dd>
+
+                                                    <dt>Visible From</dt>
+                                                    <dd>
+                                                        {% if space.visible_space_ids %}
+                                                            {{ space.visible_space_ids|join:", " }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </dd>
+                                                </dl>
+                                            </details>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <p class="empty-state">No topology spaces stored for this proposal/context yet.</p>
+                                {% endif %}
+                            </div>
+
+                            <div class="agent-section">
+                                <h4>Global Cast / System Cast</h4>
+
+                                {% with global_cast=proposal.proposed_scene_state_json.cast %}
+                                    {% if global_cast %}
+                                        <div class="cast-mini-grid">
+                                            {% for slug, member in global_cast.items %}
+                                                <details class="cast-mini-card">
+                                                    <summary><strong>{{ slug }}</strong></summary>
+
+                                                    <dl class="agent-definition-list">
+                                                        <dt>Presence</dt>
+                                                        <dd>{{ member.presence|default:"—" }}</dd>
+
+                                                        <dt>Space</dt>
+                                                        <dd>
+                                                            {% if member.local_space_label %}
+                                                                {{ member.local_space_label }}
+                                                            {% elif member.space_id %}
+                                                                {{ member.space_id }}
+                                                            {% else %}
+                                                                —
+                                                            {% endif %}
+                                                        </dd>
+
+                                                        <dt>Position</dt>
+                                                        <dd>{{ member.position|default:"—" }}</dd>
+
+                                                        <dt>Sensory Access</dt>
+                                                        <dd>{{ member.sensory_access|default:"—" }}</dd>
+
+                                                        <dt>Perception Scope</dt>
+                                                        <dd>{{ member.perception_scope|default:"—" }}</dd>
+
+                                                        <dt>Spatial Relation</dt>
+                                                        <dd>{{ member.spatial_relation|default:"—" }}</dd>
+
+                                                        <dt>Can Receive Memory</dt>
+                                                        <dd>{{ member.can_receive_memory|default:"False" }}</dd>
+
+                                                        <dt>Can Receive State Change</dt>
+                                                        <dd>{{ member.can_receive_state_change|default:"False" }}</dd>
+
+                                                        <dt>Can Receive Perception Change</dt>
+                                                        <dd>{{ member.can_receive_perception_change|default:"False" }}</dd>
+                                                    </dl>
+
+                                                    {% if member.perceives %}
+                                                        <h5>Perceives</h5>
+                                                        <table class="debug-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Target</th>
+                                                                    <th>Access</th>
+                                                                    <th>Reason</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {% for target_slug, edge in member.perceives.items %}
+                                                                    <tr>
+                                                                        <td>{{ target_slug }}</td>
+                                                                        <td>{{ edge.access|default:"—" }}</td>
+                                                                        <td>{{ edge.reason|default:"—" }}</td>
+                                                                    </tr>
+                                                                {% endfor %}
+                                                            </tbody>
+                                                        </table>
+                                                    {% endif %}
+                                                    <details class="raw-json-folder">
+                                                        <summary>Raw Global Cast Member JSON</summary>
+                                                        <pre>{{ member|prettyjson }}</pre>
+                                                    </details>
+                                                </details>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <pre>{{ scene_state.cast_json|prettyjson }}</pre>
+                                    {% endif %}
+                                {% endwith %}
+                            </div>
+
+                            <div class="agent-section">
+                                <h4>Cassandra Draft</h4>
+                                <div class="truth-text-box">
+                                    {{ proposal.draft|linebreaksbr }}
+                                </div>
+                            </div>
+
+                            {% if proposal.scene_events_json %}
+                            <div class="agent-section">
+                                <h4>Cassandra Scene Events</h4>
+
+                                {% for event in proposal.scene_events_json %}
+                                    <details class="mini-folder">
+                                        <summary>
+                                            {{ event.event_type|default:"Scene Event" }}
+                                            {% if event.actor_slug %}
+                                                · {{ event.actor_slug }}
+                                            {% endif %}
+                                        </summary>
+
+                                        <dl class="agent-definition-list">
+                                            <dt>Actor</dt>
+                                            <dd>{{ event.actor_slug|default:"—" }}</dd>
+
+                                            <dt>Targets</dt>
+                                            <dd>
+                                                {% if event.target_slugs %}
+                                                    {{ event.target_slugs|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Summary</dt>
+                                            <dd>{{ event.summary|default:"—" }}</dd>
+
+                                            <dt>Outcome</dt>
+                                            <dd>{{ event.outcome|default:"—" }}</dd>
+
+                                            <dt>Perceived By</dt>
+                                            <dd>
+                                                {% if event.perceived_by %}
+                                                    {{ event.perceived_by|join:", " }}
+                                                {% else %}
+                                                    Narrator only / none listed
+                                                {% endif %}
+                                            </dd>
+                                        </dl>
+                                    </details>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+
+                            {% if proposal.resolved_pending_intents_json %}
+                                <div class="agent-section">
+                                    <h4>Cassandra Resolved Pending Intents</h4>
+
+                                    {% for slug, intent in proposal.resolved_pending_intents_json.items %}
+                                        <details class="mini-folder">
+                                            <summary>{{ slug }}</summary>
+
+                                            <dl class="agent-definition-list">
+                                                <dt>Purpose</dt>
+                                                <dd>{{ intent.purpose|default:"—" }}</dd>
+
+                                                <dt>Tone</dt>
+                                                <dd>{{ intent.tone|default:"—" }}</dd>
+
+                                                <dt>Next</dt>
+                                                <dd>{{ intent.next|default:"—" }}</dd>
+                                            </dl>
+
+                                            <details class="raw-json-folder">
+                                                <summary>Raw Resolved Intent JSON</summary>
+                                                <pre>{{ intent|prettyjson }}</pre>
+                                            </details>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            <details class="raw-json-folder">
+                                <summary>Raw True/System JSON</summary>
+
+                                <h5>Proposal Proposed Scene State</h5>
+                                <pre>{{ proposal.proposed_scene_state_json|prettyjson }}</pre>
+
+                                <h5>Scene Events</h5>
+                                <pre>{{ proposal.scene_events_json|prettyjson }}</pre>
+
+                                <h5>Resolved Pending Intents</h5>
+                                <pre>{{ proposal.resolved_pending_intents_json|prettyjson }}</pre>
+
+                                <h5>Current SceneState</h5>
+                                <pre>{{ scene_state|prettyjson }}</pre>
+                            </details>
+                        </div>
+
+
+                        <!-- RIGHT: CHARACTER-AGENT REALITY -->
+                        <div class="agent-column">
+                            <h3>Character-Agent Reality</h3>
+                            <div class="agent-section highlight-section">
+    <h4>Exact Character-Agent Request</h4>
+
+    {% if req %}
+        <details class="mini-folder">
+            <summary>System Prompt / Instructions</summary>
+            <pre>{{ req.instructions }}</pre>
+        </details>
+
+        <details class="mini-folder">
+            <summary>Developer Prompt</summary>
+            <pre>{{ req.input.0.content }}</pre>
+        </details>
+
+        <details class="mini-folder">
+            <summary>Exact User Message Sent to API</summary>
+            <pre>{{ req.input.1.content }}</pre>
+        </details>
+
+        <details class="mini-folder">
+            <summary>Response Schema</summary>
+            <pre>{{ req.text.format.schema|prettyjson }}</pre>
+        </details>
+
+        <details class="mini-folder">
+            <summary>Full Request JSON</summary>
+            <pre>{{ req|prettyjson }}</pre>
+        </details>
+    {% else %}
+        <p class="debug-note">
+            This proposal does not include the full request wrapper yet.
+            It may have been generated before request debugging was added.
+        </p>
+    {% endif %}
+</div>
+
+                            <div class="agent-section">
+                                <h4>Agent Local Reality</h4>
+                                {% if ctx.characterlocal_scene_state.note %}
+                                    <p class="debug-note">{{ ctx.characterlocal_scene_state.note }}</p>
+                                {% endif %}
+
+                                {% if ctx.characterlocal_scene_state %}
+                                    <dl class="agent-definition-list">
+                                        <dt>Local Space</dt>
+                                        <dd>{{ ctx.characterlocal_scene_state.data.space.label|default:"—" }}</dd>
+
+                                        <dt>Space ID</dt>
+                                        <dd>{{ ctx.characterlocal_scene_state.data.space.id|default:"—" }}</dd>
+
+                                        <dt>Narrative Frame Summary</dt>
+                                        <dd>{{ ctx.characterlocal_scene_state.data.narrative_frame_summary|default:"—" }}</dd>
+                                    </dl>
+
+                                    {% if ctx.characterlocal_scene_state.data.space %}
+                                        <h5>Local Space</h5>
+
+                                        <dl class="agent-definition-list">
+                                            <dt>Space ID</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.space.id|default:"—" }}</dd>
+
+                                            <dt>Label</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.space.label|default:"—" }}</dd>
+
+                                            <dt>Kind</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.space.kind|default:"—" }}</dd>
+
+                                            <dt>Description</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.space.description|default:"—" }}</dd>
+
+                                            <dt>Occupants</dt>
+                                            <dd>
+                                                {% if ctx.characterlocal_scene_state.data.space.occupants %}
+                                                    {{ ctx.characterlocal_scene_state.data.space.occupants|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Adjacent Spaces</dt>
+                                            <dd>
+                                                {% if ctx.characterlocal_scene_state.data.space.adjacent_space_ids %}
+                                                    {{ ctx.characterlocal_scene_state.data.space.adjacent_space_ids|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Visible Spaces</dt>
+                                            <dd>
+                                                {% if ctx.characterlocal_scene_state.data.space.visible_space_ids %}
+                                                    {{ ctx.characterlocal_scene_state.data.space.visible_space_ids|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Audible Spaces</dt>
+                                            <dd>
+                                                {% if ctx.characterlocal_scene_state.data.space.audible_space_ids %}
+                                                    {{ ctx.characterlocal_scene_state.data.space.audible_space_ids|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+                                        </dl>
+                                    {% endif %}
+
+                                    {% if ctx.characterlocal_scene_state.data.cast %}
+                                        <h5>Locally Perceived Cast</h5>
+
+                                        <div class="cast-mini-grid">
+                                            {% for slug, member in ctx.characterlocal_scene_state.data.cast.items %}
+                                                <div class="cast-mini-card">
+                                                    <strong>{{ slug }}</strong>
+
+                                                    <dl class="agent-definition-list">
+                                                        <dt>Local Presence</dt>
+                                                        <dd>{{ member.local_presence|default:"—" }}</dd>
+
+                                                        <dt>Access</dt>
+                                                        <dd>{{ member.access|default:"—" }}</dd>
+
+                                                        <dt>Perception Scope</dt>
+                                                        <dd>{{ member.perception_scope|default:"—" }}</dd>
+
+                                                        <dt>Known Position</dt>
+                                                        <dd>{{ member.known_position|default:"—" }}</dd>
+
+                                                        <dt>Known Space ID</dt>
+                                                        <dd>{{ member.known_space_id|default:"—" }}</dd>
+
+                                                        <dt>Known Space Label</dt>
+                                                        <dd>{{ member.known_space_label|default:"—" }}</dd>
+
+                                                        <dt>Reason</dt>
+                                                        <dd>{{ member.perception_reason|default:"—" }}</dd>
+                                                    </dl>
+
+                                                    <details class="raw-json-folder">
+                                                        <summary>Raw Local Cast Member JSON</summary>
+                                                        <pre>{{ member|prettyjson }}</pre>
+                                                    </details>
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+
+                                    {% if ctx.characterlocal_scene_state.data.pending_intent %}
+                                        <h5>Local Pending Intent</h5>
+
+                                        <dl class="agent-definition-list">
+                                            <dt>Purpose</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.pending_intent.purpose|default:"—" }}</dd>
+
+                                            <dt>Tone</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.pending_intent.tone|default:"—" }}</dd>
+
+                                            <dt>Next</dt>
+                                            <dd>{{ ctx.characterlocal_scene_state.data.pending_intent.next|default:"—" }}</dd>
+                                        </dl>
+                                    {% endif %}
+
+                                    {% if ctx.characterlocal_scene_state.data.accessible_character_slugs %}
+                                        <h5>Accessible Character Slugs</h5>
+                                        <p>{{ ctx.characterlocal_scene_state.data.accessible_character_slugs|join:", " }}</p>
+                                    {% endif %}
+
+                                    <details class="raw-json-folder">
+                                        <summary>Raw Character Local Scene State JSON</summary>
+                                        <pre>{{ ctx.characterlocal_scene_state|prettyjson }}</pre>
+                                    </details>
+
+                                    {% if ctx.user_input %}
+                                        <div class="agent-section">
+                                            <h4>User Input Sent</h4>
+
+                                            {% if ctx.user_input.note %}
+                                                <p class="debug-note">{{ ctx.user_input.note }}</p>
+                                            {% endif %}
+
+                                            <div class="truth-text-box">
+                                                {{ ctx.user_input.data|default:"—"|linebreaksbr }}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+
+                                    {% if ctx.revision_context %}
+                                        <div class="agent-section">
+                                            <h4>Revision Context Sent</h4>
+
+                                            <dl class="agent-definition-list">
+                                                <dt>Mode</dt>
+                                                <dd>{{ ctx.revision_context.mode|default:"—" }}</dd>
+
+                                                <dt>Feedback</dt>
+                                                <dd>{{ ctx.revision_context.feedback|default:"—"|linebreaksbr }}</dd>
+                                            </dl>
+                                        </div>
+                                    {% endif %}
+                                {% else %}
+                                    <div class="pill-row">
+                                        <span class="info-pill">Presence: {{ item.scene_participation.presence|default:"—" }}</span>
+                                        <span class="info-pill">Position: {{ item.scene_participation.position|default:"—" }}</span>
+                                        <span class="info-pill">Scope: {{ item.scene_participation.perception_scope|default:"—" }}</span>
+                                    </div>
+
+                                    <p class="debug-note">
+                                        This entry does not yet include characterlocal_scene_state. It may have been generated before topology context was added.
+                                    </p>
+                                {% endif %}
+                            </div>
+
+                            <div class="agent-section">
+                                <h4>Acting Character</h4>
+
+                                {% if ctx.acting_character.note %}
+                                    <p class="debug-note">{{ ctx.acting_character.note }}</p>
+                                {% endif %}
+
+                                <dl class="agent-definition-list">
+                                    <dt>Slug</dt>
+                                    <dd>{{ ctx.acting_character.data.slug|default:item.slug }}</dd>
+
+                                    <dt>Name</dt>
+                                    <dd>{{ ctx.acting_character.data.name|default:item.name }}</dd>
+
+                                    <dt>Is Player</dt>
+                                    <dd>{{ ctx.acting_character.data.is_player }}</dd>
+
+                                    <dt>Description</dt>
+                                    <dd>{{ ctx.acting_character.data.description|default:"—"|linebreaksbr }}</dd>
+
+                                    <dt>Profile Summary</dt>
+                                    <dd>{{ ctx.acting_character.data.profile.summary|default:"—"|linebreaksbr }}</dd>
+
+                                    <dt>Archetype</dt>
+                                    <dd>{{ ctx.acting_character.data.profile.archetype|default:"—" }}</dd>
+
+                                    <dt>Gender</dt>
+                                    <dd>{{ ctx.acting_character.data.profile.gender|default:"—" }}</dd>
+
+                                    <dt>Pronouns</dt>
+                                    <dd>
+                                        {{ ctx.acting_character.data.profile.pronouns.subject|default:"—" }}
+                                        /
+                                        {{ ctx.acting_character.data.profile.pronouns.object|default:"—" }}
+                                    </dd>
+
+                                    <dt>Scene Participation</dt>
+                                    <dd>
+                                        <pre>{{ ctx.acting_character.data.scene_participation|default:item.scene_participation|prettyjson }}</pre>
+                                    </dd>
+                                </dl>
+
+                                {% if ctx.acting_character.data.profile.personality %}
+                                    <h5>Personality</h5>
+                                    <pre>{{ ctx.acting_character.data.profile.personality|prettyjson }}</pre>
+                                {% endif %}
+
+                                {% if ctx.acting_character.data.profile.permabeliefs %}
+                                    <h5>Permabeliefs</h5>
+                                    <pre>{{ ctx.acting_character.data.profile.permabeliefs|prettyjson }}</pre>
+                                {% endif %}
+
+                                {% if ctx.acting_character.data.profile.diction %}
+                                    <h5>Diction</h5>
+                                    <pre>{{ ctx.acting_character.data.profile.diction|prettyjson }}</pre>
+                                {% endif %}
+
+                                {% if ctx.acting_character.data.profile.craft_notes %}
+                                    <h5>Craft Notes</h5>
+                                    <pre>{{ ctx.acting_character.data.profile.craft_notes|prettyjson }}</pre>
+                                {% endif %}
+
+                                {% if ctx.acting_character.data.profile.background %}
+                                    <h5>Background</h5>
+                                    <pre>{{ ctx.acting_character.data.profile.background|prettyjson }}</pre>
+                                {% endif %}
+
+                                {% if ctx.acting_character.data.state %}
+                                    <h5>Current Character State</h5>
+
+                                    <dl class="agent-definition-list">
+                                        <dt>Emotional State</dt>
+                                        <dd>{{ ctx.acting_character.data.state.emotional_state.summary|default:"—" }}</dd>
+
+                                        <dt>Goals</dt>
+                                        <dd>{{ ctx.acting_character.data.state.goals.summary|default:"—" }}</dd>
+
+                                        <dt>Internal Conflicts</dt>
+                                        <dd>{{ ctx.acting_character.data.state.internal_conflicts.summary|default:"—" }}</dd>
+
+                                        <dt>Motivational State</dt>
+                                        <dd>{{ ctx.acting_character.data.state.motivational_state.summary|default:"—" }}</dd>
+                                    </dl>
+
+                                    <details class="raw-json-folder">
+                                        <summary>Raw Character State JSON</summary>
+                                        <pre>{{ ctx.acting_character.data.state|prettyjson }}</pre>
+                                    </details>
+                                {% endif %}
+
+                                <details class="raw-json-folder">
+                                    <summary>Raw Acting Character JSON</summary>
+                                    <pre>{{ ctx.acting_character|prettyjson }}</pre>
+                                </details>
+                            </div>
+
+                            {% if ctx.other_characters %}
+                                <div class="agent-section">
+                                    <h4>Other Characters Sent</h4>
+
+                                    {% for character in ctx.other_characters %}
+                                        <details class="mini-folder">
+                                            <summary>
+                                                {{ character.name|default:character.slug }}
+                                                <span class="muted">({{ character.slug }})</span>
+                                                {% if character.is_player %}
+                                                    <span class="muted">· player</span>
+                                                {% endif %}
+                                            </summary>
+
+                                            <dl class="agent-definition-list">
+                                                <dt>Archetype</dt>
+                                                <dd>{{ character.archetype|default:"—" }}</dd>
+
+                                                <dt>Gender</dt>
+                                                <dd>{{ character.gender|default:"—" }}</dd>
+
+                                                <dt>Pronouns</dt>
+                                                <dd>
+                                                    {{ character.pronouns.subject|default:"—" }}
+                                                    /
+                                                    {{ character.pronouns.object|default:"—" }}
+                                                </dd>
+
+                                                <dt>Description</dt>
+                                                <dd>{{ character.description|default:"—"|linebreaksbr }}</dd>
+
+                                                <dt>Profile Summary</dt>
+                                                <dd>{{ character.profile_summary|default:"—"|linebreaksbr }}</dd>
+                                            </dl>
+                                            <details class="raw-json-folder">
+                                                <summary>Raw Other Character JSON</summary>
+                                                <pre>{{ character|prettyjson }}</pre>
+                                            </details>
+
+
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            <div class="agent-section highlight-section">
+                                <h4>Agent Output</h4>
+
+                                {% if out.scene_contribution %}
+                                    {% with c=out.scene_contribution %}
+                                        <dl class="agent-definition-list">
+                                            <dt>Output Slug</dt>
+                                            <dd>{{ out.slug|default:"—" }}</dd>
+
+                                            <dt>Contribution Slug</dt>
+                                            <dd>{{ c.slug|default:"—" }}</dd>
+
+                                            <dt>Attempted Action</dt>
+                                            <dd>{{ c.attempted_action|default:"—" }}</dd>
+
+                                            <dt>Attempted Dialogue</dt>
+                                            <dd>
+                                                {% if c.attempted_dialogue %}
+                                                    “{{ c.attempted_dialogue }}”
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Internal Intent</dt>
+                                            <dd>{{ c.internal_intent|default:"—" }}</dd>
+
+                                            <dt>Emotional Posture</dt>
+                                            <dd>{{ c.emotional_posture|default:"—" }}</dd>
+
+                                            <dt>Confidence</dt>
+                                            <dd>{{ c.confidence|default:"—" }}</dd>
+
+                                            <dt>Targets</dt>
+                                            <dd>
+                                                {% if c.target_slugs %}
+                                                    {{ c.target_slugs|join:", " }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </dd>
+
+                                            <dt>Visibility</dt>
+                                            <dd>{{ c.required_visibility|default:"—" }}</dd>
+
+                                            <dt>Audibility</dt>
+                                            <dd>{{ c.required_audibility|default:"—" }}</dd>
+
+                                            <dt>Interrupt Priority</dt>
+                                            <dd>{{ c.interrupt_priority|default:"—" }}</dd>
+
+                                            <dt>Body Motion</dt>
+                                            <dd>{{ c.body_motion|default:"—" }}</dd>
+                                        </dl>
+
+                                        {% if c.observed_focus %}
+                                            <h5>Observed Focus</h5>
+                                            <ul class="compact-debug-list">
+                                                {% for focus in c.observed_focus %}
+                                                    <li>{{ focus }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+
+                                        {% if c.beliefs_in_play %}
+                                            <h5>Beliefs in Play</h5>
+                                            <ul class="compact-debug-list">
+                                                {% for belief in c.beliefs_in_play %}
+                                                    <li>{{ belief }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+
+                                        {% if c.memory_pressures %}
+                                            <h5>Memory Pressures</h5>
+                                            <ul class="compact-debug-list">
+                                                {% for memory in c.memory_pressures %}
+                                                    <li>{{ memory }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+
+                                        {% if c.proposed_effects %}
+                                            <h5>Proposed Effects</h5>
+                                            <ul class="compact-debug-list">
+                                                {% for effect in c.proposed_effects %}
+                                                    <li>{{ effect }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% endif %}
+                                    {% endwith %}
+                                {% else %}
+                                    <pre>{{ out|prettyjson }}</pre>
+                                {% endif %}
+                            </div>
+                            {% if out.current_turn_reflection %}
+                                <div class="agent-section">
+                                    <h4>Current Turn Reflection</h4>
+
+                                    <dl class="agent-definition-list">
+                                        <dt>Emotional Posture</dt>
+                                        <dd>{{ out.current_turn_reflection.emotional_posture|default:"—" }}</dd>
+
+                                        <dt>Active Pressure</dt>
+                                        <dd>{{ out.current_turn_reflection.active_pressure|default:"—" }}</dd>
+
+                                        <dt>Anticipated Consequence</dt>
+                                        <dd>{{ out.current_turn_reflection.anticipated_consequence|default:"—" }}</dd>
+                                    </dl>
+
+                                    {% if out.current_turn_reflection.memory_or_belief_pressures %}
+                                        <h5>Memory / Belief Pressures</h5>
+                                        <ul class="compact-debug-list">
+                                            {% for pressure in out.current_turn_reflection.memory_or_belief_pressures %}
+                                                <li>{{ pressure }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if out.authored_intent %}
+                                <div class="agent-section intent-card">
+                                    <h4>Authored Intent</h4>
+                                    <div><strong>Purpose:</strong> {{ out.authored_intent.purpose|default:"—" }}</div>
+                                    <div><strong>Tone:</strong> {{ out.authored_intent.tone|default:"—" }}</div>
+                                    <div><strong>Next:</strong> {{ out.authored_intent.next|default:"—" }}</div>
+                                </div>
+                            {% endif %}
+
+                            {% if ctx.pending_previous_scene_aftermath %}
+                                <div class="agent-section">
+                                    <h4>Pending Previous Scene Aftermath Sent</h4>
+
+                                    {% if ctx.pending_previous_scene_aftermath.note %}
+                                        <p class="debug-note">{{ ctx.pending_previous_scene_aftermath.note }}</p>
+                                    {% endif %}
+
+                                    {% if ctx.pending_previous_scene_aftermath.data %}
+                                        <dl class="agent-definition-list">
+                                            <dt>CharacterScene ID</dt>
+                                            <dd>{{ ctx.pending_previous_scene_aftermath.data.character_scene_id|default:"—" }}</dd>
+
+                                            <dt>Source Turn</dt>
+                                            <dd>{{ ctx.pending_previous_scene_aftermath.data.source_turn_number|default:"—" }}</dd>
+
+                                            <dt>Participation</dt>
+                                            <dd>{{ ctx.pending_previous_scene_aftermath.data.participation|default:"—" }}</dd>
+                                        </dl>
+
+                                        <h5>Event Record Text</h5>
+                                        <pre>{{ ctx.pending_previous_scene_aftermath.data.event_record_text }}</pre>
+
+                                        <details class="raw-json-folder">
+                                            <summary>Raw Pending Previous Scene Aftermath JSON</summary>
+                                            <pre>{{ ctx.pending_previous_scene_aftermath.data|prettyjson }}</pre>
+                                        </details>
+                                    {% else %}
+                                        <p class="empty-state">No pending previous scene aftermath sent.</p>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if out.previous_scene_aftermath %}
+                                <div class="agent-section">
+                                    <h4>Previous Scene Aftermath</h4>
+
+                                    {% if out.previous_scene_aftermath.subjective_scene_text %}
+                                        <h5>Subjective Scene Text</h5>
+                                        <pre>{{ out.previous_scene_aftermath.subjective_scene_text }}</pre>
+                                    {% endif %}
+
+                                    {% if out.previous_scene_aftermath.memories %}
+                                        <h5>Memories Created</h5>
+                                        <ul class="compact-debug-list">
+                                            {% for memory in out.previous_scene_aftermath.memories %}
+                                                <li>
+                                                    <span class="muted">{{ memory.memory_type }}</span>
+                                                    {{ memory.content }}
+                                                    {% if memory.related_character_slug %}
+                                                        <span class="muted">({{ memory.related_character_slug }})</span>
+                                                    {% endif %}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+
+                                    {% if out.previous_scene_aftermath.state_update %}
+                                        <h5>State Update</h5>
+                                        <dl class="agent-definition-list">
+                                            <dt>Emotional State</dt>
+                                            <dd>{{ out.previous_scene_aftermath.state_update.emotional_state_json.summary|default:"—" }}</dd>
+
+                                            <dt>Goals</dt>
+                                            <dd>{{ out.previous_scene_aftermath.state_update.goals_json.summary|default:"—" }}</dd>
+
+                                            <dt>Internal Conflicts</dt>
+                                            <dd>{{ out.previous_scene_aftermath.state_update.internal_conflicts_json.summary|default:"—" }}</dd>
+
+                                            <dt>Motivational State</dt>
+                                            <dd>{{ out.previous_scene_aftermath.state_update.motivational_state_json.summary|default:"—" }}</dd>
+                                        </dl>
+                                    {% endif %}
+
+                                    {% if out.previous_scene_aftermath.perception_updates %}
+                                        <h5>Perception Updates Created</h5>
+
+                                        {% for p in out.previous_scene_aftermath.perception_updates %}
+                                            <details class="mini-folder">
+                                                <summary>{{ p.target_slug }}</summary>
+
+                                                <dl class="agent-definition-list">
+                                                    <dt>Summary</dt>
+                                                    <dd>{{ p.summary|default:"—" }}</dd>
+
+                                                    <dt>Impression</dt>
+                                                    <dd>{{ p.impression_json.summary|default:"—" }}</dd>
+
+                                                    <dt>Relationship</dt>
+                                                    <dd>{{ p.relationship_json.summary|default:"—" }}</dd>
+
+                                                    <dt>Belief</dt>
+                                                    <dd>{{ p.belief_json.summary|default:"—" }}</dd>
+
+                                                    <dt>Arc</dt>
+                                                    <dd>{{ p.arc_json.summary|default:"—" }}</dd>
+                                                </dl>
+
+                                                <div class="relationship-score-grid">
+                                                    <div>Trust Δ: {{ p.trust_delta|floatformat:2 }}</div>
+                                                    <div>Attraction Δ: {{ p.attraction_delta|floatformat:2 }}</div>
+                                                    <div>Fear Δ: {{ p.fear_delta|floatformat:2 }}</div>
+                                                    <div>Resentment Δ: {{ p.resentment_delta|floatformat:2 }}</div>
+                                                </div>
+                                            </details>
+                                        {% endfor %}
+                                    {% endif %}
+
+                                    {% if out.previous_scene_aftermath.beliefs %}
+                                        <h5>Beliefs Created</h5>
+                                        <table class="debug-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Subject</th>
+                                                    <th>Belief</th>
+                                                    <th>Confidence</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for belief in out.previous_scene_aftermath.beliefs %}
+                                                    <tr>
+                                                        <td>{{ belief.subject_slug|default:belief.subject_type }}</td>
+                                                        <td>{{ belief.belief }}</td>
+                                                        <td>{{ belief.confidence }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    {% endif %}
+
+                                    <details class="raw-json-folder">
+                                        <summary>Raw Previous Scene Aftermath JSON</summary>
+                                        <pre>{{ out.previous_scene_aftermath|prettyjson }}</pre>
+                                    </details>
+                                </div>
+                            {% endif %}
+
+                            {% if ctx.recent_character_memories.data %}
+                                <div class="agent-section">
+                                    <h4>Recent Character Memories Sent</h4>
+
+                                    {% if ctx.recent_character_memories.note %}
+                                        <p class="debug-note">{{ ctx.recent_character_memories.note }}</p>
+                                    {% endif %}
+
+                                    <ul class="debug-list">
+                                        {% for memory in ctx.recent_character_memories.data %}
+                                            <li>
+                                                <span class="muted">{{ memory.memory_type }}</span>
+                                                {{ memory.content }}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+
+                            {% if ctx.beliefs.data %}
+                            <div class="agent-section">
+                                <h4>Beliefs Sent</h4>
+
+                                {% if ctx.beliefs.note %}
+                                    <p class="debug-note">{{ ctx.beliefs.note }}</p>
+                                {% endif %}
+
+                                <table class="debug-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Subject</th>
+                                            <th>Belief</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for belief in ctx.beliefs.data %}
+                                            <tr>
+                                                <td>{{ belief.subject_slug|default:belief.subject_type }}</td>
+                                                <td>{{ belief.belief }}</td>
+                                                <td>{{ belief.confidence }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+
+                            {% if ctx.recent_scenes.data %}
+                                <div class="agent-section">
+                                    <h4>Subjective Recent Scenes Sent</h4>
+
+                                    {% if ctx.recent_scenes.note %}
+                                        <p class="debug-note">{{ ctx.recent_scenes.note }}</p>
+                                    {% endif %}
+
+                                    {% for scene in ctx.recent_scenes.data %}
+                                        <details class="mini-folder">
+                                            <summary>
+                                                Turn {{ scene.turn_index }}
+                                                {% if scene.participation %}
+                                                    · {{ scene.participation }}
+                                                {% endif %}
+                                            </summary>
+
+                                            {% if scene.scene_text %}
+                                                <pre>{{ scene.scene_text }}</pre>
+                                            {% else %}
+                                                <p class="empty-state">No subjective scene text.</p>
+                                            {% endif %}
+
+                                            <details>
+                                                <summary>Raw subjective scene JSON</summary>
+                                                <pre>{{ scene|prettyjson }}</pre>
+                                            </details>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            {% if ctx.recent_scene_events.data %}
+                                <div class="agent-section">
+                                    <h4>Recent Scene Events Sent</h4>
+
+                                    {% if ctx.recent_scene_events.note %}
+                                        <p class="debug-note">{{ ctx.recent_scene_events.note }}</p>
+                                    {% endif %}
+
+                                    {% for event_scene in ctx.recent_scene_events.data %}
+                                        <details class="mini-folder">
+                                            <summary>
+                                                Turn {{ event_scene.turn_index }}
+                                                {% if event_scene.participation %}
+                                                    · {{ event_scene.participation }}
+                                                {% endif %}
+                                            </summary>
+
+                                            {% if event_scene.event_record_text %}
+                                                <h5>Event Record Text</h5>
+                                                <pre>{{ event_scene.event_record_text }}</pre>
+                                            {% endif %}
+
+                                            <details>
+                                                <summary>Raw Recent Scene Event JSON</summary>
+                                                <pre>{{ event_scene|prettyjson }}</pre>
+                                            </details>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            {% if ctx.perceptions.data %}
+                                <div class="agent-section">
+                                    <h4>Perceptions Sent</h4>
+
+                                    {% if ctx.perceptions.note %}
+                                        <p class="debug-note">{{ ctx.perceptions.note }}</p>
+                                    {% endif %}
+
+                                    {% for p in ctx.perceptions.data %}
+                                        <details class="mini-folder">
+                                            <summary>{{ p.target_slug }}</summary>
+
+                                            <dl class="agent-definition-list">
+                                                <dt>Summary</dt>
+                                                <dd>{{ p.summary|default:"—" }}</dd>
+
+                                                <dt>Impression</dt>
+                                                <dd>{{ p.impression.summary|default:"—" }}</dd>
+
+                                                <dt>Relationship</dt>
+                                                <dd>{{ p.relationship.summary|default:"—" }}</dd>
+
+                                                <dt>Belief</dt>
+                                                <dd>{{ p.belief.summary|default:"—" }}</dd>
+
+                                                <dt>Arc</dt>
+                                                <dd>{{ p.arc.summary|default:"—" }}</dd>
+                                            </dl>
+
+                                            <div class="relationship-score-grid">
+                                                <div>Trust: {{ p.trust|floatformat:2 }}</div>
+                                                <div>Attraction: {{ p.attraction|floatformat:2 }}</div>
+                                                <div>Fear: {{ p.fear|floatformat:2 }}</div>
+                                                <div>Resentment: {{ p.resentment|floatformat:2 }}</div>
+                                            </div>
+
+                                            <details>
+                                                <summary>Raw Perception JSON</summary>
+                                                <pre>{{ p|prettyjson }}</pre>
+                                            </details>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            <details class="raw-json-folder">
+                                <summary>Raw Agent Input JSON</summary>
+                                <pre>{{ ctx|prettyjson }}</pre>
+                            </details>
+
+                            <details class="raw-json-folder json-tree-folder">
+                                <summary>Raw Full Agent Request JSON</summary>
+
+                                <script type="application/json" class="json-tree-source">
+                                    {{ req|to_json }}
+                                </script>
+
+                                <div class="json-tree"></div>
+                            </details>
+
+                            <details class="raw-json-folder">
+                                <summary>Raw Agent Output JSON</summary>
+                                <pre>{{ out|prettyjson }}</pre>
+                            </details>
+                        </div>
+                    </div>
+                </details>
+                {% endwith %}
+            {% endfor %}
+        {% else %}
+            <p>No character-agent debug data stored for this proposal yet.</p>
+        {% endif %}
+    </details>
+</section>
+{% endif %}
+
 <script>
 function openEditMode(proposalId) {
     const readOnlyBlock = document.getElementById(`draft-readonly-${proposalId}`);
@@ -674,6 +1838,99 @@ document.addEventListener("DOMContentLoaded", function () {
             "title",
             isDark ? "Light mode" : "Dark mode"
         );
+    }
+});
+</script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".json-tree-folder").forEach(function (folder) {
+        const source = folder.querySelector(".json-tree-source");
+        const target = folder.querySelector(".json-tree");
+
+        if (!source || !target) return;
+
+        let data;
+
+        try {
+            data = JSON.parse(source.textContent);
+        } catch (error) {
+            target.innerHTML = "<pre class='json-error'>Could not parse JSON.</pre>";
+            return;
+        }
+
+        target.appendChild(renderJsonTree(data));
+    });
+
+    function renderJsonTree(value, keyName = null) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "json-node";
+
+        if (value === null || typeof value !== "object") {
+            wrapper.appendChild(renderPrimitive(keyName, value));
+            return wrapper;
+        }
+
+        const isArray = Array.isArray(value);
+        const keys = isArray ? value.map((_, index) => index) : Object.keys(value);
+
+        const details = document.createElement("details");
+        details.open = false;
+
+        const summary = document.createElement("summary");
+        summary.className = "json-summary";
+
+        const keySpan = document.createElement("span");
+        keySpan.className = "json-key";
+
+        if (keyName !== null) {
+            keySpan.textContent = keyName + ": ";
+            summary.appendChild(keySpan);
+        }
+
+        const typeSpan = document.createElement("span");
+        typeSpan.className = "json-type";
+        typeSpan.textContent = isArray
+            ? `Array(${value.length})`
+            : `Object(${keys.length})`;
+
+        summary.appendChild(typeSpan);
+        details.appendChild(summary);
+
+        const children = document.createElement("div");
+        children.className = "json-children";
+
+        keys.forEach(function (key) {
+            children.appendChild(renderJsonTree(value[key], key));
+        });
+
+        details.appendChild(children);
+        wrapper.appendChild(details);
+
+        return wrapper;
+    }
+
+    function renderPrimitive(keyName, value) {
+        const row = document.createElement("div");
+        row.className = "json-primitive-row";
+
+        if (keyName !== null) {
+            const key = document.createElement("span");
+            key.className = "json-key";
+            key.textContent = keyName + ": ";
+            row.appendChild(key);
+        }
+
+        const val = document.createElement("span");
+        val.className = "json-value json-" + typeof value;
+
+        if (typeof value === "string") {
+            val.textContent = JSON.stringify(value);
+        } else {
+            val.textContent = String(value);
+        }
+
+        row.appendChild(val);
+        return row;
     }
 });
 </script>

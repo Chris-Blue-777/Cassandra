@@ -6,6 +6,168 @@ from .characters import build_character_registry
 
 client = OpenAI()
 
+VALID_PERCEPTION_ACCESS = {
+    "direct_full",
+    "direct_partial",
+    "mediated_audio",
+    "mediated_text",
+    "inferred",
+    "none",
+}
+
+
+def _clean_space_id(value):
+    if not isinstance(value, str):
+        return "unknown_space"
+
+    value = value.strip().lower()
+    value = value.replace("'", "")
+    value = value.replace('"', "")
+    value = "_".join(value.split())
+
+    cleaned = "".join(ch for ch in value if ch.isalnum() or ch == "_")
+    return cleaned or "unknown_space"
+
+
+def _clean_perception_access(value):
+    if not isinstance(value, str):
+        return "none"
+
+    value = value.strip().lower()
+    return value if value in VALID_PERCEPTION_ACCESS else "none"
+
+
+def _normalize_spaces(raw_spaces):
+    spaces = {}
+
+    if not isinstance(raw_spaces, list):
+        return spaces
+
+    for item in raw_spaces:
+        if not isinstance(item, dict):
+            continue
+
+        space_id = _clean_space_id(item.get("space_id"))
+        spaces[space_id] = {
+            "space_id": space_id,
+            "label": str(item.get("label") or "").strip(),
+            "kind": str(item.get("kind") or "unknown").strip(),
+            "description": str(item.get("description") or "").strip(),
+            "occupants": [
+                str(slug).strip()
+                for slug in item.get("occupants", [])
+                if str(slug).strip()
+            ],
+            "adjacent_space_ids": [
+                _clean_space_id(space_id)
+                for space_id in item.get("adjacent_space_ids", [])
+            ],
+            "visible_space_ids": [
+                _clean_space_id(space_id)
+                for space_id in item.get("visible_space_ids", [])
+            ],
+            "audible_space_ids": [
+                _clean_space_id(space_id)
+                for space_id in item.get("audible_space_ids", [])
+            ],
+        }
+
+    return spaces
+
+
+def _normalize_perception_edges(raw_edges, valid_slugs):
+    edges = {}
+
+    if isinstance(raw_edges, dict):
+        iterable = [
+            {
+                "target_slug": target_slug,
+                "access": edge.get("access") if isinstance(edge, dict) else None,
+                "reason": edge.get("reason", "") if isinstance(edge, dict) else "",
+            }
+            for target_slug, edge in raw_edges.items()
+        ]
+    elif isinstance(raw_edges, list):
+        iterable = raw_edges
+    else:
+        return edges
+
+    for edge in iterable:
+        if not isinstance(edge, dict):
+            continue
+
+        target_slug = str(edge.get("target_slug") or "").strip()
+        if target_slug not in valid_slugs:
+            continue
+
+        edges[target_slug] = {
+            "access": _clean_perception_access(edge.get("access")),
+            "reason": str(edge.get("reason") or "").strip(),
+        }
+
+    return edges
+
+SPACE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "space_id": {"type": "string"},
+        "label": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": ["room", "hall", "outdoor_area", "vehicle", "threshold", "remote", "unknown"],
+        },
+        "description": {"type": "string"},
+        "occupants": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "adjacent_space_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "visible_space_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "audible_space_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": [
+        "space_id",
+        "label",
+        "kind",
+        "description",
+        "occupants",
+        "adjacent_space_ids",
+        "visible_space_ids",
+        "audible_space_ids",
+    ],
+}
+
+PERCEPTION_EDGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "target_slug": {"type": "string"},
+        "access": {
+            "type": "string",
+            "enum": [
+                "direct_full",
+                "direct_partial",
+                "mediated_audio",
+                "mediated_text",
+                "inferred",
+                "none",
+            ],
+        },
+        "reason": {"type": "string"},
+    },
+    "required": ["target_slug", "access", "reason"],
+}
+
 VALID_PRESENCE = {"present", "remote", "mentioned", "nearby", "off-screen"}
 VALID_SPATIAL_RELATIONS = {"inside_scene", "adjacent", "distant", "absent"}
 VALID_SENSORY_ACCESS = {
@@ -24,6 +186,54 @@ PRESENCE_DEFAULTS = {
     "off-screen": {"spatial_relation": "absent", "sensory_access": "indirect"},
     "mentioned": {"spatial_relation": "absent", "sensory_access": "none"},
 }
+
+NON_DURABLE_ALIAS_KEYS = {
+    "i", "me", "my", "mine",
+    "you", "your", "yours",
+    "he", "him", "his", "he's",
+    "she", "her", "hers",
+    "they", "them", "their", "theirs",
+    "we", "us", "our", "ours",
+    "someone", "something", "everything",
+    "the question",
+}
+
+NON_CHARACTER_NOUNS = {
+    "doorway", "hall", "the hall", "open doorway",
+    "kitchen", "fridge", "living room", "bedroom",
+    "front door",
+}
+
+BODY_PART_TERMS = {
+    "hand", "hands", "my hand", "her hands",
+    "fingertips", "my fingertips",
+    "cock", "my cock", "his cock",
+    "back", "mallory's back",
+    "inner thigh", "mallory's inner thigh",
+}
+
+def _alias_is_durable(alias_key, slug):
+    if not alias_key or not slug:
+        return False
+
+    if alias_key in NON_DURABLE_ALIAS_KEYS:
+        return False
+
+    if alias_key in NON_CHARACTER_NOUNS:
+        return False
+
+    if alias_key in BODY_PART_TERMS:
+        return False
+
+    # Do not persist temporary scene-object aliases.
+    if str(slug).startswith("tmp_"):
+        return False
+
+    # Avoid possessive body/object phrases.
+    if "'s " in alias_key:
+        return False
+
+    return True
 
 def _clean_spatial_relation(value):
     if not isinstance(value, str):
@@ -82,6 +292,9 @@ def _build_cast_entry(
     position: str = "",
     spatial_relation: str | None = None,
     sensory_access: str | None = None,
+    space_id=None,
+    local_space_label="",
+    perceives=None,
 ) -> dict:
     axes = _resolve_participation_axes(
         presence=presence,
@@ -97,16 +310,25 @@ def _build_cast_entry(
         "spatial_relation": axes["spatial_relation"],
         "sensory_access": axes["sensory_access"],
         "position": (position or "").strip(),
+        "space_id": _clean_space_id(space_id),
+        "local_space_label": local_space_label or "",
+        "perceives": perceives or {},
         **flags,
     }
 
 
 def _serialize_scene_state(scene_state):
+    topology = getattr(scene_state, "topology_json", {}) or {}
+    if not isinstance(topology, dict):
+        topology = {}
+
     return {
         "location": scene_state.location or "opening scene",
+        "narrative_frame": topology.get("narrative_frame", {}),
+        "spaces": topology.get("spaces", {}),
         "cast": scene_state.cast_json or {},
         "pending_intents": scene_state.pending_intents_json or {},
-        "alias_cache": scene_state.alias_cache_json or {}
+        "alias_cache": scene_state.alias_cache_json or {},
     }
 
 
@@ -144,11 +366,19 @@ def build_scene_participant_context(
         ],
     }
 
-def _normalize_scene_participant_output(data):
+def _normalize_scene_participant_output(data, registry=None):
+    registry_slugs = set(_valid_character_slugs(registry or []))
+
     if not isinstance(data, dict):
         return {
             "scene_state_update": {
                 "location": None,
+                "narrative_frame": {
+                    "summary_location": None,
+                    "camera_scope": "single_space",
+                    "active_space_ids": [],
+                },
+                "spaces": {},
                 "cast": {},
             },
             "resolution_notes": [],
@@ -156,15 +386,58 @@ def _normalize_scene_participant_output(data):
         }
 
     scene_state_update = data.get("scene_state_update") or {}
+    if not isinstance(scene_state_update, dict):
+        scene_state_update = {}
+
     cast_data = scene_state_update.get("cast") or []
     notes = data.get("resolution_notes") or []
     alias_cache_update = data.get("alias_cache_update") or {}
 
+    raw_spaces = scene_state_update.get("spaces") or []
+    spaces = _normalize_spaces(raw_spaces)
+
+    raw_narrative_frame = scene_state_update.get("narrative_frame") or {}
+    if not isinstance(raw_narrative_frame, dict):
+        raw_narrative_frame = {}
+
+    narrative_frame = {
+        "summary_location": raw_narrative_frame.get("summary_location"),
+        "camera_scope": raw_narrative_frame.get("camera_scope") or "single_space",
+        "active_space_ids": [
+            _clean_space_id(space_id)
+            for space_id in raw_narrative_frame.get("active_space_ids", [])
+            if str(space_id).strip()
+        ],
+    }
+
+    # Build the set of allowed perception targets.
+    # This should include known registry characters AND any temporary slugs
+    # that MissPots actually included in this turn's cast.
+    cast_slugs = set()
+
+    if isinstance(cast_data, dict):
+        cast_slugs.update(
+            str(slug).strip()
+            for slug in cast_data.keys()
+            if str(slug).strip()
+        )
+
+    elif isinstance(cast_data, list):
+        for entry in cast_data:
+            if not isinstance(entry, dict):
+                continue
+            slug = str(entry.get("slug") or "").strip()
+            if slug:
+                cast_slugs.add(slug)
+
+    valid_perception_targets = registry_slugs | cast_slugs
+
     normalized_cast = {}
 
     if isinstance(cast_data, dict):
-        # Fallback support if cast is already dict-shaped
+        # Fallback support if cast is already dict-shaped.
         for slug, payload in cast_data.items():
+            slug = str(slug or "").strip()
             if not slug or not isinstance(payload, dict):
                 continue
 
@@ -173,15 +446,21 @@ def _normalize_scene_participant_output(data):
                 position=payload.get("position", ""),
                 spatial_relation=payload.get("spatial_relation"),
                 sensory_access=payload.get("sensory_access"),
+                space_id=payload.get("space_id"),
+                local_space_label=payload.get("local_space_label", ""),
+                perceives=_normalize_perception_edges(
+                    payload.get("perceives") or [],
+                    valid_slugs=valid_perception_targets,
+                ),
             )
 
     elif isinstance(cast_data, list):
-        # Normal path for schema-backed LLM output
+        # Normal path for schema-backed LLM output.
         for entry in cast_data:
             if not isinstance(entry, dict):
                 continue
 
-            slug = entry.get("slug")
+            slug = str(entry.get("slug") or "").strip()
             if not slug:
                 continue
 
@@ -190,6 +469,12 @@ def _normalize_scene_participant_output(data):
                 position=entry.get("position", ""),
                 spatial_relation=entry.get("spatial_relation"),
                 sensory_access=entry.get("sensory_access"),
+                space_id=entry.get("space_id"),
+                local_space_label=entry.get("local_space_label", ""),
+                perceives=_normalize_perception_edges(
+                    entry.get("perceives") or [],
+                    valid_slugs=valid_perception_targets,
+                ),
             )
 
     normalized_notes = []
@@ -199,9 +484,9 @@ def _normalize_scene_participant_output(data):
                 continue
 
             normalized_notes.append({
-                "text": note.get("text", ""),
+                "text": str(note.get("text") or "").strip(),
                 "resolved_slug": note.get("resolved_slug"),
-                "reason": note.get("reason", ""),
+                "reason": str(note.get("reason") or "").strip(),
             })
 
     alias_cache_update = _normalize_alias_cache_update(alias_cache_update)
@@ -209,6 +494,8 @@ def _normalize_scene_participant_output(data):
     return {
         "scene_state_update": {
             "location": scene_state_update.get("location"),
+            "narrative_frame": narrative_frame,
+            "spaces": spaces,
             "cast": normalized_cast,
         },
         "resolution_notes": normalized_notes,
@@ -241,11 +528,18 @@ def _merge_alias_cache(existing, update, valid_slugs=None, allow_tmp=True):
     merged = {
         _normalize_alias_key(alias): slug
         for alias, slug in existing.items()
-        if _normalize_alias_key(alias) and slug_allowed(slug)
+        if (
+            _normalize_alias_key(alias)
+            and slug_allowed(slug)
+            and _alias_is_durable(_normalize_alias_key(alias), slug)
+        )
     }
 
     for alias, slug in update.items():
         alias_key = _normalize_alias_key(alias)
+
+        if not _alias_is_durable(alias_key, slug):
+            continue
 
         if not alias_key or not slug_allowed(slug):
             continue
@@ -265,12 +559,22 @@ def _merge_alias_cache(existing, update, valid_slugs=None, allow_tmp=True):
 def _normalize_alias_cache_update(raw):
     normalized = {}
 
-    if not isinstance(raw, dict):
+    if isinstance(raw, dict):
+        iterable = [
+            {"alias": alias, "slug": slug}
+            for alias, slug in raw.items()
+        ]
+    elif isinstance(raw, list):
+        iterable = raw
+    else:
         return normalized
 
-    for alias, slug in raw.items():
-        alias_key = _normalize_alias_key(alias)
-        slug = str(slug or "").strip()
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+
+        alias_key = _normalize_alias_key(item.get("alias"))
+        slug = str(item.get("slug") or "").strip()
 
         if not alias_key or not slug:
             continue
@@ -284,6 +588,9 @@ def _valid_character_slugs(registry):
 
 def _filter_scene_participant_output(data, registry):
     valid_slugs = _valid_character_slugs(registry)
+    scene_state_update = data.get("scene_state_update") or {}
+    raw_spaces = scene_state_update.get("spaces") or []
+    spaces = _normalize_spaces(raw_spaces)
     cast = data["scene_state_update"]["cast"]
 
     filtered_cast = {}
@@ -334,7 +641,7 @@ def infer_scene_participants_and_positions(world, scene_state, scene_text, pov_s
     )
 
     raw = call_scene_participant_inference(context)
-    normalized = _normalize_scene_participant_output(raw)
+    normalized = _normalize_scene_participant_output(raw, registry=context["character_registry"])
     filtered = _filter_scene_participant_output(
         normalized,
         registry=context["character_registry"],
@@ -365,12 +672,21 @@ def _merge_scene_state_updates(primary, secondary, valid_slugs=None, allow_tmp=T
         position = payload.get("position", existing.get("position", ""))
         spatial_relation = payload.get("spatial_relation", existing.get("spatial_relation"))
         sensory_access = payload.get("sensory_access", existing.get("sensory_access"))
+        space_id = payload.get("space_id", existing.get("space_id", ""))
+        local_space_label = payload.get(
+            "local_space_label",
+            existing.get("local_space_label", ""),
+        )
+        perceives = payload.get("perceives", existing.get("perceives", {}))
 
         merged_cast[slug] = _build_cast_entry(
             presence=presence,
             position=position,
             spatial_relation=spatial_relation,
             sensory_access=sensory_access,
+            space_id=space_id,
+            local_space_label=local_space_label,
+            perceives=perceives,
         )
 
     for slug, payload in (secondary.get("cast") or {}).items():
@@ -382,12 +698,21 @@ def _merge_scene_state_updates(primary, secondary, valid_slugs=None, allow_tmp=T
         position = payload.get("position", existing.get("position", ""))
         spatial_relation = payload.get("spatial_relation", existing.get("spatial_relation"))
         sensory_access = payload.get("sensory_access", existing.get("sensory_access"))
+        space_id = payload.get("space_id", existing.get("space_id", ""))
+        local_space_label = payload.get(
+            "local_space_label",
+            existing.get("local_space_label", ""),
+        )
+        perceives = payload.get("perceives", existing.get("perceives", {}))
 
         merged_cast[slug] = _build_cast_entry(
             presence=presence,
             position=position,
             spatial_relation=spatial_relation,
             sensory_access=sensory_access,
+            space_id=space_id,
+            local_space_label=local_space_label,
+            perceives=perceives,
         )
 
     location = secondary.get("location") or primary.get("location")
@@ -539,30 +864,81 @@ If a resolution_note identifies a character who is acting or present in the scen
 
 ---
 
-LOCATION INFERENCE
+SPATIAL TOPOLOGY INFERENCE
 
-- Return a location ONLY if the scene clearly establishes or changes it
-- Otherwise return null
-- If a new location is established, do not preserve incompatible prior positions
+You are not limited to one physical location.
 
----
+The story may use an omniscient or multi-space narrative camera. A scene can include:
+- one character in one room
+- other characters in another room
+- characters hearing each other through a wall, door, hall, phone, text, or other mediated channel
+- characters who are narratively visible to Cassandra but not perceptible to each other
 
-POSITION RULES
+Return:
+1. narrative_frame
+2. spaces
+3. cast entries with space_id and perception edges
 
-- Keep positions short, concrete, and relative to the scene
+Definitions:
+
+narrative_frame:
+- summary_location: a human-readable summary of the whole narrative frame
+- camera_scope:
+  - single_space: all active characters are in the same immediate space
+  - multi_space: more than one space matters
+  - omniscient_multi_space: the narration can show multiple spaces even when characters cannot perceive each other
+  - remote_or_unclear: spatial relation is unclear or mediated
+- active_space_ids: every space currently relevant to the scene
+
+spaces:
+- Each physical or communicative area relevant to the scene.
 - Examples:
-  - "inside the bar"
-  - "car outside"
-  - "near the doorway"
-  - "on the phone"
+  - byrne_bedroom
+  - donnie_room
+  - hall
+  - phone_call
+  - outside_car
+- Use stable snake_case ids.
+- occupants should include characters physically in that space.
+- audible_space_ids should include spaces that can be heard from this space.
+- visible_space_ids should include spaces that can be seen from this space.
+- adjacent_space_ids should include nearby spaces that are physically connected.
+
+cast:
+- Each cast entry must include the character's own space_id.
+- A character is present in their own space even if the narrative camera is centered elsewhere.
+- Do not mark a character as present/full in another character's room unless they are physically there.
+- Use perceives to describe what this character can perceive of other characters.
+
+Perception edge rules:
+- direct_full: same room/space, directly visible/audible
+- direct_partial: same threshold or partially obstructed
+- mediated_audio: heard through door, hall, wall, phone, recording, etc.
+- mediated_text: text/chat/written communication
+- inferred: not directly perceived, but reasonably inferred
+- none: not perceived
+
+Closed doors, walls, separate rooms, and opaque barriers block direct visual access.
+
+If two characters are in different spaces and the connection is audible but not visible, use:
+access = "mediated_audio"
+
+Do not use "direct_partial" for a character on the other side of a closed door unless the scene establishes a visual opening, line of sight, crack in the door, window, mirror, camera, or other direct visual channel.
+
+"direct_partial" means the observer can directly see some part of the target, the target's body language, movement, facial expression, or physical position.
+
+"mediated_audio" means the observer may hear voice, tone, volume, impact sounds, movement sounds, breathing, or other audible cues, but cannot see silent body language, exact touch, facial expression, or precise physical positioning.
+
+Important:
+- Cassandra may be omniscient.
+- Character-agents are not.
+- The topology must distinguish what the narrator can show from what each character can perceive.
 
 ---
 
 SCENE CONSISTENCY
 
-- Respect current_scene_state unless the new scene clearly overrides it
 - Use recent_scenes for continuity when needed
-- Do not hallucinate large changes to cast or location
 
 ---
 
@@ -655,6 +1031,8 @@ SCENE_PARTICIPANT_SCHEMA = {
                                 "type": "string",
                                 "enum": ["present", "remote", "mentioned", "nearby", "off-screen"]
                             },
+                            "space_id": {"type": "string"},
+                            "local_space_label": {"type": "string"},
                             "position": {
                                 "type": "string"
                             },
@@ -673,12 +1051,55 @@ SCENE_PARTICIPANT_SCHEMA = {
                                     "none"
                                 ]
                             },
+                            "perceives": {
+                                "type": "array",
+                                "items": PERCEPTION_EDGE_SCHEMA,
+                            },
                         },
-                        "required": ["slug", "presence", "position", "spatial_relation", "sensory_access"]
+                        "required": [
+                            "slug",
+                            "presence",
+                            "space_id",
+                            "local_space_label",
+                            "position",
+                            "spatial_relation",
+                            "sensory_access",
+                            "perceives",
+                        ]
                     }
-                }
+                },
+                "narrative_frame": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "summary_location": {"type": ["string", "null"]},
+                        "camera_scope": {
+                            "type": "string",
+                            "enum": [
+                                "single_space",
+                                "multi_space",
+                                "omniscient_multi_space",
+                                "remote_or_unclear",
+                            ],
+                        },
+                        "active_space_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["summary_location", "camera_scope", "active_space_ids"],
+                },
+                "spaces": {
+                    "type": "array",
+                    "items": SPACE_SCHEMA,
+                },
             },
-            "required": ["location", "cast"]
+            "required": [
+                "location",
+                "narrative_frame",
+                "spaces",
+                "cast",
+            ],
         },
         "resolution_notes": {
             "type": "array",
@@ -700,11 +1121,17 @@ SCENE_PARTICIPANT_SCHEMA = {
             }
         },
         "alias_cache_update": {
-            "type": "object",
-            "additionalProperties": {
-                "type": "string"
-            }
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "alias": {"type": "string"},
+                    "slug": {"type": "string"},
+                },
+                "required": ["alias", "slug"],
+            },
         }
     },
-    "required": ["scene_state_update", "resolution_notes"]
+    "required": ["scene_state_update", "resolution_notes", "alias_cache_update"],
 }

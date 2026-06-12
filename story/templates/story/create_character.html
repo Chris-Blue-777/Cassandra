@@ -6,7 +6,11 @@
     <title>Create Character</title>
 </head>
 <body>
-    <h1>Create a Character</h1>
+    <h1>{% if is_editing %}
+        Edit Character
+    {% else %}
+        Create Character
+    {% endif %}</h1>
 
     <button onclick="window.location.href='{% url 'cast_page' %}'">Back to Cast</button>
 
@@ -18,7 +22,11 @@
         {% csrf_token %}
         {{ form.as_p }}
 
-        <button type="submit">Create Character</button>
+        <button type="submit">{% if is_editing %}
+            Save Changes
+        {% else %}
+            Create Character
+        {% endif %}</button>
     </form>
 </body>
 </html>
