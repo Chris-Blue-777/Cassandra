@@ -528,6 +528,18 @@
                         <div class="chat-bubble chat-bubble-cassandra">
                             <div class="chat-meta">
                                 <span class="chat-speaker">Cassandra</span>
+                                <span class="chat-state-tag">Turn {{ scene.turn_number }}</span>
+                                <form
+                                    method="post"
+                                    action="{% url 'delete_committed_scene' scene.id %}"
+                                    class="inline-delete-form"
+                                    onsubmit="return confirm('Delete this scene and every later scene? This rewinds the story and removes associated memories and character scene records.');"
+                                >
+                                    {% csrf_token %}
+                                    <button type="submit" class="danger subtle-danger">
+                                        Delete From Here
+                                    </button>
+                                </form>
                             </div>
                             <div class="chat-message-body">
                                 {{ scene.cassandra_text|linebreaksbr }}
@@ -950,7 +962,7 @@
 
         <details class="mini-folder">
             <summary>Exact User Message Sent to API</summary>
-            <pre>{{ req.input.1.content }}</pre>
+            <pre>{{ req.input.0.content }}</pre>
         </details>
 
         <details class="mini-folder">

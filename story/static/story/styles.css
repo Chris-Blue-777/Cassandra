@@ -496,6 +496,27 @@ button.secondary:hover {
     background: var(--accent-soft);
 }
 
+button.danger {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: #fff;
+}
+
+button.danger:hover {
+    border-color: var(--danger);
+    background: var(--danger);
+    box-shadow: 0 4px 14px rgba(154, 61, 50, 0.14);
+}
+
+button.subtle-danger {
+    background: transparent;
+    color: var(--danger);
+}
+
+button.subtle-danger:hover {
+    background: rgba(154, 61, 50, 0.08);
+}
+
 .theme-toggle {
     width: 42px;
     height: 42px;
@@ -968,12 +989,29 @@ details[open] summary::before {
     margin: 0;
 }
 
+.inline-delete-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.chat-meta .inline-delete-form {
+    margin-left: auto;
+}
+
 .chat-actions button {
     padding: 4px 10px;
     font-size: 0.75rem;
     border-radius: 999px;
     line-height: 1;
     margin-top: 0;
+}
+
+.chat-meta button.subtle-danger {
+    padding: 2px 7px;
+    font-size: 0.58rem;
+    line-height: 1;
+    margin: 0;
+    border-radius: 5px;
 }
 
 .chat-actions button.secondary {

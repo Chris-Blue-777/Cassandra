@@ -460,44 +460,44 @@ def _normalize_pending_intents_output(data):
 # Intent resolution public API
 # =========================================================
 
-def resolve_intents(
-    world,
-    scene_state,
-    user_input,
-    final_draft,
-    character_authored_intents,
-    resolved_scene_state=None,
-    scene_events=None,
-):
-    context = collect_characterbot_intent_context(
-        world=world,
-        scene_state=scene_state,
-        user_input=user_input,
-        final_draft=final_draft,
-        character_authored_intents=character_authored_intents,
-        scene_events=scene_events,
-    )
-
-    raw = call_intent_resolver(context)
-    normalized = _normalize_pending_intents_output(raw)
-
-    valid_slugs = valid_character_slugs(world)
-    authored_slugs = set((character_authored_intents or {}).keys())
-    allowed_slugs = authored_slugs & valid_slugs
-
-    filtered = {
-        slug: payload
-        for slug, payload in normalized.items()
-        if slug in allowed_slugs
-    }
-
-    participation_state = resolved_scene_state or scene_state
-
-    return _apply_intent_state_change_gate(
-        authored_intents=character_authored_intents or {},
-        resolved_intents=filtered,
-        participation_scene_state=participation_state,
-    )
+# def resolve_intents(
+#     world,
+#     scene_state,
+#     user_input,
+#     final_draft,
+#     character_authored_intents,
+#     resolved_scene_state=None,
+#     scene_events=None,
+# ):
+#     context = collect_characterbot_intent_context(
+#         world=world,
+#         scene_state=scene_state,
+#         user_input=user_input,
+#         final_draft=final_draft,
+#         character_authored_intents=character_authored_intents,
+#         scene_events=scene_events,
+#     )
+#
+#     raw = call_intent_resolver(context)
+#     normalized = _normalize_pending_intents_output(raw)
+#
+#     valid_slugs = valid_character_slugs(world)
+#     authored_slugs = set((character_authored_intents or {}).keys())
+#     allowed_slugs = authored_slugs & valid_slugs
+#
+#     filtered = {
+#         slug: payload
+#         for slug, payload in normalized.items()
+#         if slug in allowed_slugs
+#     }
+#
+#     participation_state = resolved_scene_state or scene_state
+#
+#     return _apply_intent_state_change_gate(
+#         authored_intents=character_authored_intents or {},
+#         resolved_intents=filtered,
+#         participation_scene_state=participation_state,
+#     )
 
 
 def valid_character_slugs(world):
@@ -624,32 +624,32 @@ def _validate_intent_resolver_context(context: dict[str, Any]) -> None:
         raise ValueError("recent_narrative_memories must be a list")
 
 
-def call_intent_resolver(context):
-    _validate_intent_resolver_context(context)
+# def call_intent_resolver(context):
+#     _validate_intent_resolver_context(context)
 
-    response = client.responses.create(
-        model=MODEL_NAME,
-        instructions=INTENT_RESOLVER_SYSTEM_PROMPT,
-        input=[
-            {
-                "role": "developer",
-                "content": INTENT_RESOLVER_DEVELOPER_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": json.dumps(context, ensure_ascii=False, indent=2),
-            },
-        ],
-    )
+#     response = client.responses.create(
+#         model=MODEL_NAME,
+#         instructions=INTENT_RESOLVER_SYSTEM_PROMPT,
+#         input=[
+#             {
+#                 "role": "developer",
+#                 "content": INTENT_RESOLVER_DEVELOPER_PROMPT,
+#             },
+#             {
+#                 "role": "user",
+#                 "content": json.dumps(context, ensure_ascii=False, indent=2),
+#             },
+#         ],
+#     )
 
-    if not response.output_text:
-        raise ValueError("Intent resolver returned no output text")
+#     if not response.output_text:
+#         raise ValueError("Intent resolver returned no output text")
 
-    data = json.loads(response.output_text)
-    if not isinstance(data, dict):
-        raise ValueError("Intent resolver returned non-object JSON")
+#     data = json.loads(response.output_text)
+#     if not isinstance(data, dict):
+#         raise ValueError("Intent resolver returned non-object JSON")
 
-    return data
+#     return data
 
 def _scene_cast_dict(scene_state_or_dict):
     """

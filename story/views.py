@@ -1,4 +1,7 @@
 #views.py#
+import json
+
+from django.db import transaction
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import (
     World,
@@ -8,8 +11,11 @@ from .models import (
     Character,
     CharacterProfile,
     NarrativeMemory,
+    CharacterBelief,
     CharacterPerception,
     CharacterPerceptionChange,
+    CharacterState,
+    CharacterStateChange,
     TempSceneState,
     CharacterScene,
 )
@@ -35,13 +41,256 @@ from .MissPots.characters import (
     build_character_registry,
     collect_character_contributions,
     collect_character_authored_intents_from_contributions,
-    collect_single_character_experience_updates,
-    persist_character_experience_updates,
     build_character_event_record_text,
     apply_character_contribution_to_scene,
     character_state_snapshot,
 )
 from .forms import CharacterForm
+
+def _log_story_heading(title):
+    print(f"\n=== STORY {title} ===", flush=True)
+
+
+def _log_story_text(label, text):
+    print(f"[story] {label}:", flush=True)
+    print(text or "", flush=True)
+
+
+def _log_story_json(label, data):
+    print(f"[story] {label}:", flush=True)
+    try:
+        print(json.dumps(data, indent=2, ensure_ascii=False), flush=True)
+    except TypeError:
+        print(repr(data), flush=True)
+
+
+def _character_contribution_log_rows(character_contributions):
+    rows = []
+
+    for contribution in character_contributions or []:
+        if not isinstance(contribution, dict):
+            continue
+
+        rows.append({
+            "slug": contribution.get("slug", ""),
+            "attempted_action": contribution.get("attempted_action", ""),
+            "attempted_dialogue": contribution.get("attempted_dialogue", ""),
+            "internal_intent": contribution.get("internal_intent", ""),
+            "authored_intent": contribution.get("authored_intent", {}),
+        })
+
+    return rows
+
+
+def _scene_state_log_summary(scene_state_data):
+    if not isinstance(scene_state_data, dict):
+        return {}
+
+    cast = scene_state_data.get("cast", {}) or {}
+    pending_intents = scene_state_data.get("pending_intents", {}) or {}
+    spaces = scene_state_data.get("spaces", {}) or {}
+    alias_cache = scene_state_data.get("alias_cache", {}) or {}
+
+    return {
+        "location": scene_state_data.get("location", ""),
+        "cast_slugs": list(cast.keys()) if isinstance(cast, dict) else [],
+        "pending_intent_slugs": (
+            list(pending_intents.keys())
+            if isinstance(pending_intents, dict)
+            else []
+        ),
+        "space_ids": list(spaces.keys()) if isinstance(spaces, dict) else [],
+        "alias_count": len(alias_cache) if isinstance(alias_cache, dict) else 0,
+    }
+
+
+def _find_proposal_for_committed_scene(scene):
+    return (
+        Proposal.objects
+        .filter(
+            world=scene.world,
+            is_approved=True,
+            user_input=scene.user_text,
+            draft=scene.cassandra_text,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _delete_legacy_null_source_beliefs(character_scenes):
+    for character_scene in character_scenes:
+        for belief in character_scene.beliefs_created_json or []:
+            if not isinstance(belief, dict):
+                continue
+
+            belief_text = str(belief.get("belief") or "").strip()
+            if not belief_text:
+                continue
+
+            CharacterBelief.objects.filter(
+                world=character_scene.world,
+                character=character_scene.character,
+                source_scene__isnull=True,
+                subject_type=belief.get("subject_type") or "",
+                subject_slug=belief.get("subject_slug") or "",
+                belief=belief_text,
+            ).delete()
+
+
+def _rebuild_character_state_for_rewind(world, character_ids):
+    for character in Character.objects.filter(world=world, id__in=character_ids):
+        latest_change = (
+            CharacterStateChange.objects
+            .filter(world=world, character=character)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+
+        if not latest_change:
+            CharacterState.objects.filter(character=character).delete()
+            continue
+
+        state, _ = CharacterState.objects.get_or_create(character=character)
+        state.emotional_state_json = latest_change.emotional_state_json or {}
+        state.goals_json = latest_change.goals_json or {}
+        state.internal_conflicts_json = latest_change.internal_conflicts_json or {}
+        state.motivational_state_json = latest_change.motivational_state_json or {}
+        state.save()
+
+
+def _rebuild_perception_for_pair(world, observer_id, target_id):
+    changes = (
+        CharacterPerceptionChange.objects
+        .filter(world=world, observer_id=observer_id, target_id=target_id)
+        .order_by("created_at", "id")
+    )
+
+    if not changes.exists():
+        CharacterPerception.objects.filter(
+            world=world,
+            observer_id=observer_id,
+            target_id=target_id,
+        ).delete()
+        return
+
+    perception, _ = CharacterPerception.objects.get_or_create(
+        world=world,
+        observer_id=observer_id,
+        target_id=target_id,
+        defaults={"summary": ""},
+    )
+
+    summary = ""
+    impression = {}
+    relationship = {}
+    belief = {}
+    arc = {}
+    trust = 0.0
+    attraction = 0.0
+    fear = 0.0
+    resentment = 0.0
+
+    for change in changes:
+        summary = change.summary or summary
+        impression = change.impression_json or impression
+        relationship = change.relationship_json or relationship
+        belief = change.belief_json or belief
+        arc = change.arc_json or arc
+        trust += change.trust_delta or 0.0
+        attraction += change.attraction_delta or 0.0
+        fear += change.fear_delta or 0.0
+        resentment += change.resentment_delta or 0.0
+
+    perception.summary = summary
+    perception.impression_json = impression
+    perception.relationship_json = relationship
+    perception.belief_json = belief
+    perception.arc_json = arc
+    perception.trust = trust
+    perception.attraction = attraction
+    perception.fear = fear
+    perception.resentment = resentment
+    perception.save()
+
+
+def _rebuild_perceptions_for_rewind(world, perception_pairs):
+    for observer_id, target_id in perception_pairs:
+        _rebuild_perception_for_pair(world, observer_id, target_id)
+
+
+def _fallback_scene_state_from_latest_scene(scene):
+    cast = {}
+
+    character_scenes = (
+        CharacterScene.objects
+        .filter(world=scene.world, source_scene=scene)
+        .select_related("character")
+    )
+
+    for character_scene in character_scenes:
+        if character_scene.local_scene_state_json:
+            cast[character_scene.character.slug] = (
+                character_scene.local_scene_state_json
+            )
+
+    return {
+        "location": "opening scene",
+        "cast": cast,
+        "pending_intents": {},
+        "alias_cache": {},
+        "narrative_frame": {},
+        "spaces": {},
+    }
+
+
+def _rewind_scene_state(world):
+    scene_state, _ = SceneState.objects.get_or_create(
+        world=world,
+        defaults={
+            "location": "opening scene",
+            "cast_json": {},
+            "pending_intents_json": {},
+            "alias_cache_json": {},
+            "topology_json": {},
+        }
+    )
+
+    latest_scene = (
+        CommittedScene.objects
+        .filter(world=world)
+        .order_by("-turn_number")
+        .first()
+    )
+
+    if not latest_scene:
+        scene_state.location = "opening scene"
+        scene_state.cast_json = {}
+        scene_state.pending_intents_json = {}
+        scene_state.alias_cache_json = {}
+        scene_state.topology_json = {}
+        scene_state.save()
+        return
+
+    proposal = _find_proposal_for_committed_scene(latest_scene)
+    if proposal:
+        rewind_state = {
+            **(proposal.proposed_scene_state_json or {}),
+            "pending_intents": proposal.resolved_pending_intents_json or {},
+        }
+    else:
+        rewind_state = _fallback_scene_state_from_latest_scene(latest_scene)
+
+    scene_state.location = rewind_state.get("location", scene_state.location)
+    scene_state.cast_json = rewind_state.get("cast", {})
+    scene_state.pending_intents_json = rewind_state.get("pending_intents", {})
+    scene_state.alias_cache_json = rewind_state.get("alias_cache", {})
+    scene_state.topology_json = {
+        "narrative_frame": rewind_state.get("narrative_frame", {}),
+        "spaces": rewind_state.get("spaces", {}),
+    }
+    scene_state.save()
+
 
 def normalize_intents(intents):
     normalized = {}
@@ -247,6 +496,16 @@ def generate_draft(request):
     if not user_input:
         return redirect("scene_page")
 
+    _log_story_heading("GENERATE DRAFT")
+    print(
+        "[story] world=",
+        active_world.name,
+        "scene_state_id=",
+        scene_state.id,
+        flush=True,
+    )
+    _log_story_text("user_input", user_input)
+
     player_character = Character.objects.filter(
         world=active_world,
         is_player=True,
@@ -273,6 +532,25 @@ def generate_draft(request):
 
         participant_update = participant_result.get("scene_state_update", {})
         alias_update = participant_result.get("alias_cache_update", {})
+        _log_story_json(
+            "participant_update_summary",
+            _scene_state_log_summary(participant_update),
+        )
+        _log_story_json(
+            "alias_update_summary",
+            {
+                "alias_count": (
+                    len(alias_update)
+                    if isinstance(alias_update, dict)
+                    else 0
+                ),
+                "aliases": (
+                    list(alias_update.keys())
+                    if isinstance(alias_update, dict)
+                    else []
+                ),
+            },
+        )
 
         valid_slugs = _valid_character_slugs(build_character_registry(active_world))
         merged_alias_cache = _merge_alias_cache(
@@ -305,6 +583,10 @@ def generate_draft(request):
             user_input=user_input,
             include_debug=True,
         )
+        _log_story_json(
+            "character_contributions",
+            _character_contribution_log_rows(character_contributions),
+        )
 
         character_authored_intents = (
             collect_character_authored_intents_from_contributions(
@@ -331,6 +613,12 @@ def generate_draft(request):
         )
 
         result = call_cassandra(context)
+        _log_story_text("cassandra_draft", result.get("draft", ""))
+        _log_story_json("scene_events", result.get("scene_events", []))
+        _log_story_json(
+            "resolved_pending_intents",
+            result.get("resolved_pending_intents", {}),
+        )
 
         previous_aftermath = result.get("previous_scene_aftermath") or {}
         source_scene_id = previous_aftermath.get("source_scene_id")
@@ -353,6 +641,16 @@ def generate_draft(request):
 
                 pending_scene.cassandra_aftermath_processed = True
                 pending_scene.save()
+                _log_story_json(
+                    "persisted_cassandra_previous_scene_aftermath",
+                    {
+                        "source_scene_id": pending_scene.id,
+                        "turn_number": pending_scene.turn_number,
+                        "narrative_memory_count": len(
+                            previous_aftermath.get("narrative_memories", [])
+                        ),
+                    },
+                )
 
     except Exception as e:
         print("DRAFT GENERATION ERROR:", type(e).__name__, e)
@@ -370,7 +668,7 @@ def generate_draft(request):
             "error": f"Draft generation error: {type(e).__name__}: {e}",
         })
 
-    Proposal.objects.create(
+    proposal = Proposal.objects.create(
         world=active_world,
         user_input=user_input,
         draft=result["draft"],
@@ -392,6 +690,13 @@ def generate_draft(request):
         alias_cache_update_json=alias_update,
         character_agent_debug_json=character_agent_debug,
     )
+    print(
+        "[story] proposal_created id=",
+        proposal.id,
+        "draft_chars=",
+        len(proposal.draft or ""),
+        flush=True,
+    )
 
     return redirect("scene_page")
 
@@ -403,7 +708,17 @@ def approve_draft(request, proposal_id):
     proposal = get_object_or_404(Proposal, id=proposal_id)
     world = proposal.world
 
+    _log_story_heading("APPROVE DRAFT")
+    print(
+        "[story] proposal_id=",
+        proposal.id,
+        "world=",
+        world.name,
+        flush=True,
+    )
+
     if proposal.is_approved:
+        print("[story] approval_skipped already_approved=True", flush=True)
         return redirect("scene_page")
 
     scene_state, _ = SceneState.objects.get_or_create(
@@ -437,6 +752,16 @@ def approve_draft(request, proposal_id):
         scene_events_json=proposal.scene_events_json or [],
         cassandra_aftermath_processed=False,
     )
+    print(
+        "[story] committed_scene_created id=",
+        committed_scene.id,
+        "turn=",
+        committed_scene.turn_number,
+        flush=True,
+    )
+    _log_story_text("approved_user_input", proposal.user_input)
+    _log_story_text("approved_cassandra_text", proposal.draft)
+    _log_story_json("approved_scene_events", committed_scene.scene_events_json or [])
 
     # Use the draft-time scene-state inference.
     # Do NOT call MissPots again here.
@@ -451,6 +776,10 @@ def approve_draft(request, proposal_id):
         **first_pass_state,
         "pending_intents": resolved_pending_intents,
     }
+    _log_story_json(
+        "final_resolved_state_summary",
+        _scene_state_log_summary(final_resolved_state),
+    )
 
     # aftermath = extract_scene_aftermath(
     #     world=world,
@@ -568,22 +897,21 @@ def approve_draft(request, proposal_id):
 
         apply_character_contribution_to_scene(character_scene, contribution)
         character_scene.save()
-
-        print("CHARACTER SCENES AFTER APPROVAL:")
-
-        for cs in CharacterScene.objects.filter(
-            world=world,
-            source_scene=committed_scene,
-        ).select_related("character").order_by("character__slug"):
-            print(
-                "CHARACTER SCENE ROW:",
-                "id=", cs.id,
-                "turn=", cs.turn_number,
-                "character=", cs.character.slug,
-                "processed=", cs.aftermath_processed,
-                "subjective=", repr(cs.subjective_scene_text),
-                "event_record=", repr((cs.event_record_text or "")[:120]),
-            )
+        print(
+            "[story] character_scene_prepared id=",
+            character_scene.id,
+            "turn=",
+            character_scene.turn_number,
+            "character=",
+            character.slug,
+            "participation=",
+            character_scene.participation,
+            "perceived_events=",
+            len(perceived_events),
+            "has_contribution=",
+            bool(contribution),
+            flush=True,
+        )
 
     scene_state.location = final_resolved_state.get(
         "location",
@@ -611,6 +939,88 @@ def approve_draft(request, proposal_id):
     )
 
     scene_state.save()
+    print(
+        "[story] scene_state_updated id=",
+        scene_state.id,
+        "location=",
+        scene_state.location,
+        "cast_count=",
+        len(scene_state.cast_json or {}),
+        "pending_intents_count=",
+        len(scene_state.pending_intents_json or {}),
+        flush=True,
+    )
+
+    return redirect("scene_page")
+
+
+def delete_committed_scene(request, scene_id):
+    if request.method != "POST":
+        return redirect("scene_page")
+
+    target_scene = get_object_or_404(CommittedScene, id=scene_id)
+    world = target_scene.world
+
+    with transaction.atomic():
+        scenes_to_delete = list(
+            CommittedScene.objects
+            .filter(
+                world=world,
+                turn_number__gte=target_scene.turn_number,
+            )
+            .order_by("turn_number")
+        )
+        scene_ids = [scene.id for scene in scenes_to_delete]
+        deleted_turns = [scene.turn_number for scene in scenes_to_delete]
+
+        character_scenes = list(
+            CharacterScene.objects
+            .filter(world=world, source_scene_id__in=scene_ids)
+            .select_related("character")
+        )
+
+        affected_character_ids = set(
+            CharacterStateChange.objects
+            .filter(world=world, source_scene_id__in=scene_ids)
+            .values_list("character_id", flat=True)
+        )
+        affected_character_ids.update(
+            character_scene.character_id
+            for character_scene in character_scenes
+        )
+
+        affected_perception_pairs = set(
+            CharacterPerceptionChange.objects
+            .filter(world=world, source_scene_id__in=scene_ids)
+            .values_list("observer_id", "target_id")
+        )
+
+        _delete_legacy_null_source_beliefs(character_scenes)
+
+        for scene in scenes_to_delete:
+            Proposal.objects.filter(
+                world=world,
+                is_approved=True,
+                user_input=scene.user_text,
+                draft=scene.cassandra_text,
+            ).delete()
+
+        CommittedScene.objects.filter(id__in=scene_ids).delete()
+
+        _rebuild_character_state_for_rewind(world, affected_character_ids)
+        _rebuild_perceptions_for_rewind(world, affected_perception_pairs)
+        _rewind_scene_state(world)
+
+    _log_story_heading("DELETE COMMITTED SCENE")
+    print(
+        "[story] deleted_scene_ids=",
+        scene_ids,
+        "deleted_turns=",
+        deleted_turns,
+        "world=",
+        world.name,
+        flush=True,
+    )
 
     return redirect("scene_page")
 

@@ -993,6 +993,18 @@ def _normalize_resolved_pending_intents(data):
 
 
 def call_cassandra(payload):
+
+    # This is the actual narrative weaving call. Cassandra receives:
+
+    # user input
+    # scene state
+    # character-agent contributions
+    # recent scenes
+    # narrative memory
+    # pending intents
+
+    # and produces the reviewable scene draft.
+
     _validate_cassandra_payload(payload)
     _validate_recent_scene_items(payload["recent_scenes"])
 
@@ -1472,72 +1484,72 @@ Non-negotiable rules:
 - Do not create character experience updates for characters who were not eligible to receive them.
 """
 
-def extract_character_memory_from_scene(
-    world,
-    character,
-    resolved_scene_state,
-    scene_text,
-    user_input=None,
-):
-    recent_scenes = list(
-        CommittedScene.objects.filter(world=world)
-        .order_by("-created_at")[:3]
-    )[::-1]
+# def extract_character_memory_from_scene(
+#     world,
+#     character,
+#     resolved_scene_state,
+#     scene_text,
+#     user_input=None,
+# ):
+#     recent_scenes = list(
+#         CommittedScene.objects.filter(world=world)
+#         .order_by("-created_at")[:3]
+#     )[::-1]
 
-    recent_character_memories = list(
-        CharacterMemory.objects.filter(character=character)
-        .order_by("-created_at")[:5]
-    )[::-1]
+#     recent_character_memories = list(
+#         CharacterMemory.objects.filter(character=character)
+#         .order_by("-created_at")[:5]
+#     )[::-1]
 
-    cast = (resolved_scene_state or {}).get("cast", {})
-    cast_entry = cast.get(character.slug, {})
-    profile = getattr(character, "profile", None)
+#     cast = (resolved_scene_state or {}).get("cast", {})
+#     cast_entry = cast.get(character.slug, {})
+#     profile = getattr(character, "profile", None)
 
-    payload = {
-        "character": {
-            "slug": character.slug,
-            "name": character.name,
-            "description": character.description or "",
-            "profile": {
-                "summary": getattr(profile, "summary", ""),
-                "archetype": getattr(profile, "archetype", ""),
-                "gender": getattr(profile, "gender", ""),
-                "pronouns": getattr(profile, "pronouns_json", {}),
-                "personality": getattr(profile, "personality_json", {}),
-                "diction": getattr(profile, "diction_json", {}),
-                "craft_notes": getattr(profile, "craft_notes_json", {}),
-                "background": getattr(profile, "background_json", {}),
-            },
-        },
-        "current_scene_state": resolved_scene_state or {},
-        "observer_cast_entry": cast_entry,
-        "scene_text": scene_text or "",
-        "user_input": user_input or "",
-        "recent_scenes": _serialize_recent_scenes(recent_scenes),
-        "recent_character_memories": [
-            {"content": m.content, "memory_type": m.memory_type}
-            for m in recent_character_memories
-        ],
-    }
+#     payload = {
+#         "character": {
+#             "slug": character.slug,
+#             "name": character.name,
+#             "description": character.description or "",
+#             "profile": {
+#                 "summary": getattr(profile, "summary", ""),
+#                 "archetype": getattr(profile, "archetype", ""),
+#                 "gender": getattr(profile, "gender", ""),
+#                 "pronouns": getattr(profile, "pronouns_json", {}),
+#                 "personality": getattr(profile, "personality_json", {}),
+#                 "diction": getattr(profile, "diction_json", {}),
+#                 "craft_notes": getattr(profile, "craft_notes_json", {}),
+#                 "background": getattr(profile, "background_json", {}),
+#             },
+#         },
+#         "current_scene_state": resolved_scene_state or {},
+#         "observer_cast_entry": cast_entry,
+#         "scene_text": scene_text or "",
+#         "user_input": user_input or "",
+#         "recent_scenes": _serialize_recent_scenes(recent_scenes),
+#         "recent_character_memories": [
+#             {"content": m.content, "memory_type": m.memory_type}
+#             for m in recent_character_memories
+#         ],
+#     }
 
-    _validate_recent_scene_items(payload["recent_scenes"])
+#     _validate_recent_scene_items(payload["recent_scenes"])
 
-    response = client.responses.create(
-        model=MODEL_NAME,
-        instructions=CHARACTER_MEMORY_EXTRACTION_SYSTEM_PROMPT,
-        input=[
-            {
-                "role": "developer",
-                "content": CHARACTER_MEMORY_EXTRACTION_DEVELOPER_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": json.dumps(payload, ensure_ascii=False, indent=2),
-            },
-        ],
-    )
+#     response = client.responses.create(
+#         model=MODEL_NAME,
+#         instructions=CHARACTER_MEMORY_EXTRACTION_SYSTEM_PROMPT,
+#         input=[
+#             {
+#                 "role": "developer",
+#                 "content": CHARACTER_MEMORY_EXTRACTION_DEVELOPER_PROMPT,
+#             },
+#             {
+#                 "role": "user",
+#                 "content": json.dumps(payload, ensure_ascii=False, indent=2),
+#             },
+#         ],
+#     )
 
-    if not response.output_text:
-        return ""
+#     if not response.output_text:
+#         return ""
 
-    return response.output_text.strip()
+#     return response.output_text.strip()

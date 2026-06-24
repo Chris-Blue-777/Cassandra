@@ -26,6 +26,37 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
+PERSPECTIVE_BEAT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "perspective_beat": {"type": "string"},
+        "private_player_material": {"type": "string"},
+        "visibility_note": {"type": "string"},
+    },
+    "required": [
+        "perspective_beat",
+        "private_player_material",
+        "visibility_note",
+    ],
+}
+
+PERSPECTIVE_BEAT_SYSTEM_PROMPT = """
+You rewrite the user's latest scene beat into the acting character's local, second-person perspective.
+
+Return only valid JSON matching the schema.
+
+Rules:
+- Write perspective_beat as immersive prose addressed to the acting character as "you".
+- Do not address the acting character by name in the prose.
+- Resolve first-person user references such as I, me, my, and mine to the player character(s), not to the acting character unless the acting character is_player=true.
+- Use characterlocal_scene_state as the boundary for what the acting character can directly see, partially see, hear, infer, or not know.
+- Preserve uncertainty when access is partial, inferred, mediated, obstructed, or intermittent.
+- Do not turn private player thoughts into character knowledge. Put private/internal-only player material in private_player_material if it matters.
+- Do not add bespoke warnings or corrections about impossible states. Just write the local perspective cleanly.
+- Do not decide the acting character's response, attempted action, dialogue, or intent.
+"""
+
 def apply_character_contribution_to_scene(character_scene, contribution):
     """
     Attach the character-agent's draft-time contribution to this CharacterScene.
@@ -295,16 +326,21 @@ def _characterlocal_scene_state(scene_state, acting_slug):
             continue
 
         access = edge.get("access", "none")
-
-        local_cast[target_slug] = {
+        local_entry = {
             "local_presence": _local_presence_from_access(access),
             "access": access,
             "perception_scope": _perception_scope_from_access(access),
-            "known_position": target_entry.get("position", ""),
-            "known_space_id": target_entry.get("space_id", ""),
-            "known_space_label": target_entry.get("local_space_label", ""),
             "perception_reason": edge.get("reason", ""),
         }
+
+        if access != "none":
+            local_entry.update({
+                "known_position": target_entry.get("position", ""),
+                "known_space_id": target_entry.get("space_id", ""),
+                "known_space_label": target_entry.get("local_space_label", ""),
+            })
+
+        local_cast[target_slug] = local_entry
 
     pending_intents = scene_state.pending_intents_json or {}
     if not isinstance(pending_intents, dict):
@@ -525,12 +561,18 @@ def persist_character_experience_updates(
         update = entry.get("experience_update") or {}
 
         print(
-            "CHARACTER EXPERIENCE UPDATE:",
-            "slug=", slug,
-            "memories=", len(update.get("memories", []) or []),
-            "state_update=", update.get("state_update") or {},
-            "perception_updates=", update.get("perception_updates") or [],
-            "beliefs=", update.get("beliefs") or [],
+            "[story] character_experience_update",
+            "character=",
+            slug,
+            "memories=",
+            len(update.get("memories", []) or []),
+            "has_state_update=",
+            bool(_has_meaningful_json_payload(update.get("state_update") or {})),
+            "perception_updates=",
+            len(update.get("perception_updates") or []),
+            "beliefs=",
+            len(update.get("beliefs") or []),
+            flush=True,
         )
 
         # --- Memories ---
@@ -618,13 +660,13 @@ def persist_character_experience_updates(
                 subject_slug=belief.get("subject_slug") or "",
                 belief=belief_text,
                 confidence=belief.get("confidence") or 0.5,
+                source_scene=source_scene,
             )
 
         # --- Perceptions ---
         for p in update.get("perception_updates", []) or []:
-            print("RAW PERCEPTION UPDATE:", p)
             if not isinstance(p, dict):
-                print("DROPPING PERCEPTION UPDATE: not a dict", p)
+                print("[story] dropping_perception_update not_a_dict", p, flush=True)
                 continue
 
             target_slug = p.get("target_slug") or p.get("target_character_slug")
@@ -632,12 +674,11 @@ def persist_character_experience_updates(
 
             if not target:
                 print(
-                    "DROPPING PERCEPTION UPDATE: invalid target_slug=",
+                    "[story] dropping_perception_update invalid_target_slug=",
                     target_slug,
                     "observer=",
                     character.slug,
-                    "payload=",
-                    p,
+                    flush=True,
                 )
                 continue
 
@@ -829,6 +870,100 @@ def validate_resolved_slug(world, slug):
         )
 
 
+def _player_characters_from_registry(registry):
+    return [
+        {
+            "slug": item.get("slug"),
+            "name": item.get("name"),
+            "description": item.get("description", ""),
+            "is_player": item.get("is_player", False),
+        }
+        for item in registry or []
+        if item.get("is_player")
+    ]
+
+
+def build_character_perspective_beat(
+    *,
+    world,
+    character,
+    user_input,
+    characterlocal_scene_state,
+    registry,
+):
+    """
+    Translate raw user scene text into second-person local prose for one agent.
+    """
+    if not (user_input or "").strip():
+        return {
+            "perspective_beat": "No new outward scene beat is available to you yet.",
+            "private_player_material": "",
+            "visibility_note": "",
+        }
+
+    config = get_character_agent_config(character)
+    client = config["client"]
+    model = config["model"]
+
+    payload = {
+        "active_world": {
+            "name": world.name,
+            "description": world.description,
+        },
+        "acting_character": {
+            "slug": character.slug,
+            "name": character.name,
+            "description": character.description or "",
+            "is_player": character.is_player,
+        },
+        "player_characters": _player_characters_from_registry(registry),
+        "characterlocal_scene_state": characterlocal_scene_state or {},
+        "raw_user_input": user_input or "",
+    }
+
+    response = client.responses.create(
+        model=model,
+        instructions=PERSPECTIVE_BEAT_SYSTEM_PROMPT,
+        input=[
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, indent=2),
+            },
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "perspective_beat_response",
+                "strict": True,
+                "schema": PERSPECTIVE_BEAT_RESPONSE_SCHEMA,
+            }
+        },
+    )
+
+    if not response.output_text:
+        raise ValueError("Perspective beat renderer returned no output")
+
+    try:
+        data = json.loads(response.output_text)
+    except json.JSONDecodeError as e:
+        print("PERSPECTIVE BEAT RAW OUTPUT:")
+        print(response.output_text)
+        raise ValueError(
+            f"Perspective beat renderer returned malformed JSON: {e}"
+        ) from e
+
+    if not isinstance(data, dict):
+        raise ValueError("Perspective beat renderer returned non-object JSON")
+
+    return {
+        "perspective_beat": str(data.get("perspective_beat") or "").strip(),
+        "private_player_material": str(
+            data.get("private_player_material") or ""
+        ).strip(),
+        "visibility_note": str(data.get("visibility_note") or "").strip(),
+    }
+
+
 def build_character_agent_context(
     world,
     scene_state,
@@ -877,16 +1012,14 @@ def build_character_agent_context(
     )
 
     print(
-        "BUILD CONTEXT PENDING AFTERMATH:",
+        "[story] build_character_context",
+        "character=",
         character.slug,
-        "id=",
+        "pending_aftermath_id=",
         pending_aftermath_scene.id if pending_aftermath_scene else None,
-        "turn=",
+        "pending_turn=",
         pending_aftermath_scene.turn_number if pending_aftermath_scene else None,
-        "processed=",
-        pending_aftermath_scene.aftermath_processed if pending_aftermath_scene else None,
-        "subjective=",
-        repr(pending_aftermath_scene.subjective_scene_text) if pending_aftermath_scene else None,
+        flush=True,
     )
 
     other_characters = [
@@ -927,6 +1060,19 @@ def build_character_agent_context(
     space = characterlocal_scene_state.get("space") or {}
     local_cast = characterlocal_scene_state.get("cast") or {}
     pending_intent = characterlocal_scene_state.get("pending_intent") or {}
+    perspective_beat = build_character_perspective_beat(
+        world=world,
+        character=character,
+        user_input=user_input,
+        characterlocal_scene_state=characterlocal_scene_state,
+        registry=registry,
+    )
+    perspective_beat_text = (
+        perspective_beat.get("perspective_beat")
+        or "No new outward scene beat is available to you yet."
+    )
+    private_player_material = perspective_beat.get("private_player_material") or ""
+    visibility_note = perspective_beat.get("visibility_note") or ""
 
     perception_text2 = "\n".join(
         (
@@ -1087,8 +1233,14 @@ What you experienced:
     What you believe5:
     {belief_text5}
 
-    What is happening now:
-    {user_input}
+    Latest beat, adjusted for your perspective:
+    {perspective_beat_text}
+
+    Private player material not directly available to you:
+    {private_player_material or "None."}
+
+    Visibility and access note:
+    {visibility_note or "Use the local scene state above as your boundary."}
 
     Your previous goals:
     {goalssummary}
@@ -1220,9 +1372,20 @@ What you experienced:
             ],
         ),
         "user_input": _payload_section(
-            "This is the user's latest scene beat. It is not automatically your character's perception. "
-            "Use characterlocal_scene_state to decide whether your character sees, hears, receives, infers, or does not know this information.",
+            "Raw source text from the user. This is retained for debugging and continuity only; it is not automatically your character's perception.",
             user_input or "",
+        ),
+        "perspective_adjusted_beat": _payload_section(
+            "This is the user's latest scene beat rewritten into your second-person local perspective. Treat this as what is happening now for your character-agent response.",
+            perspective_beat_text,
+        ),
+        "private_player_material": _payload_section(
+            "Player-internal material separated from your direct character knowledge.",
+            private_player_material,
+        ),
+        "perspective_visibility_note": _payload_section(
+            "Visibility/access note from the perspective rewrite.",
+            visibility_note,
         ),
         "revision_context": {
             "mode": revision_mode or "",
@@ -1240,32 +1403,48 @@ def build_character_agent_request_debug_payload(context):
     This is safe to store in Proposal.character_agent_debug_json because it
     excludes the API client object and API keys.
     """
-    return {
-        "instructions": context.get("character_agent_input", ""),
-        "input": [
-            {
-                "role": "user",
-                "content": (
-                    context.get("user_input", {}).get("data", "")
-                    if isinstance(context.get("user_input"), dict)
-                    else ""
-                )
-            },
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "character_agent_response",
-                "strict": True,
-                "schema": CHARACTER_AGENT_RESPONSE_SCHEMA,
-            }
+    instructions = context.get("character_agent_input", "")
+    input_messages = [
+        {
+            "role": "user",
+            "content": (
+                context.get("perspective_adjusted_beat", {}).get("data", "")
+                if isinstance(context.get("perspective_adjusted_beat"), dict)
+                else ""
+            )
         },
-        # This duplicate parsed version is easier to inspect in Django/admin/template.
-        # The string version above is what actually gets sent as message content.
-        "parsed_user_payload": context,
+    ]
+    text = {
+        "format": {
+            "type": "json_schema",
+            "name": "character_agent_response",
+            "strict": True,
+            "schema": CHARACTER_AGENT_RESPONSE_SCHEMA,
+        }
+    }
+
+    return {
+        "instructions": instructions,
+        "input": input_messages,
+        "text": text,
+        # Exact non-client request context sent to the character-agent.
+        "parsed_user_payload": {
+            "instructions": instructions,
+            "input": input_messages,
+            "text": text,
+        },
     }
 
 def call_character_agent(context, character=None):
+
+    # This is one of the most important calls in the system. It produces the character’s subjective attempted contribution:
+
+    # attempted_action
+    # attempted_dialogue
+    # internal_intent
+    # authored_intent
+    # experience_update
+
     config = get_character_agent_config(character)
     client = config["client"]
     api = config["api"]
@@ -1275,6 +1454,27 @@ def call_character_agent(context, character=None):
         raise ValueError(f"Unsupported character-agent API: {api}")
 
     request_payload = build_character_agent_request_debug_payload(context)
+
+    character_slug = getattr(character, "slug", "unknown")
+    print(
+        f"\n[story] character_agent_request_begin character={character_slug}",
+        flush=True,
+    )
+    print("[story] character_agent_instructions:", flush=True)
+    print(request_payload.get("instructions", ""), flush=True)
+    print("[story] character_agent_input:", flush=True)
+    print(
+        json.dumps(
+            request_payload.get("input", []),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        flush=True,
+    )
+    print(
+        f"[story] character_agent_request_end character={character_slug}\n",
+        flush=True,
+    )
 
     response = client.responses.create(
         model=model,
@@ -1605,10 +1805,12 @@ Perception boundary:
 - inferred means the character may suspect or guess, but should not treat the information as confirmed.
 - none or omitted means the character has no meaningful access.
 
-User input and private thought:
-- user_input may include the player character's private thoughts, motives, desires, interpretations, or intentions.
+Perspective-adjusted beat and private thought:
+- perspective_adjusted_beat is the latest scene beat rewritten into your local second-person perspective.
+- user_input is raw source text retained for debugging and continuity; do not treat it as your direct perception.
+- private_player_material may include the player character's private thoughts, motives, desires, interpretations, or intentions.
 - Do not let this character directly know, quote, answer, or react to private user/player thoughts.
-- If user_input includes both private thought and outward behavior, react only to the outward behavior.
+- If private_player_material describes internal player thought, react only to outward behavior described in perspective_adjusted_beat.
 - If private thought changes visible behavior, infer only a plausible visible consequence, not the exact thought.
 - Subtle outward cues do not reveal exact internal meaning.
 - Prefer biased, partial, uncertain, or socially motivated interpretation over accurate mind-reading.
@@ -1658,7 +1860,7 @@ current_turn_reflection guidance:
 
 Anti-repetition:
 - Review recent_scenes before proposing the next move.
-- Do not repeat this character's previous conversational device, emotional tactic, or social maneuver unless user_input directly calls for it.
+- Do not repeat this character's previous conversational device, emotional tactic, or social maneuver unless perspective_adjusted_beat directly calls for it.
 - A new contribution should change this character's strategy, pressure, posture, risk level, target, or focus.
 - If a prior tactic is exhausted, escalate, withdraw, reframe, misread, test a boundary, change target, or choose inaction for a new reason.
 - Do not propose dialogue that performs the same function as previous dialogue with different wording.
@@ -1755,12 +1957,18 @@ def collect_character_contributions(
             revision_mode=revision_mode,
         )
 
-        print("CHARACTER LOCAL SCENE STATE:", character.slug)
-        print(json.dumps(
-            context["characterlocal_scene_state"]["data"],
-            indent=2,
-            ensure_ascii=False,
-        ))
+        print(
+            "[story] character_agent_call",
+            "character=",
+            character.slug,
+            "presence=",
+            cast_entry.get("presence", ""),
+            "sensory_access=",
+            cast_entry.get("sensory_access", ""),
+            "perception_scope=",
+            cast_entry.get("perception_scope", ""),
+            flush=True,
+        )
 
         config = get_character_agent_config(character)
 
@@ -1775,9 +1983,16 @@ def collect_character_contributions(
         )
 
         print(
-            "PENDING CHARACTER SCENE DATA:",
+            "[story] pending_character_scene",
+            "character=",
             character.slug,
-            pending_scene_data,
+            "id=",
+            (
+                pending_scene_data.get("character_scene_id")
+                if isinstance(pending_scene_data, dict)
+                else None
+            ),
+            flush=True,
         )
 
         if pending_scene_data:
@@ -1788,19 +2003,21 @@ def collect_character_contributions(
                 aftermath_processed=False,
             ).first()
 
-            print(
-                "PENDING CHARACTER SCENE FOUND:",
-                character.slug,
-                "id=",
-                pending_scene.id if pending_scene else None,
-            )
-
             previous_scene_aftermath = result.get("previous_scene_aftermath") or {}
 
             print(
-                "SUBJECTIVE TEXT FROM AGENT:",
+                "[story] character_previous_scene_aftermath",
+                "character=",
                 character.slug,
+                "subjective_text=",
                 repr(previous_scene_aftermath.get("subjective_scene_text")),
+                "memories=",
+                len(previous_scene_aftermath.get("memories") or []),
+                "perception_updates=",
+                len(previous_scene_aftermath.get("perception_updates") or []),
+                "beliefs=",
+                len(previous_scene_aftermath.get("beliefs") or []),
+                flush=True,
             )
 
             if pending_scene and isinstance(previous_scene_aftermath, dict):
@@ -1829,6 +2046,16 @@ def collect_character_contributions(
                     ],
                     source_scene=pending_scene.source_scene,
                 )
+                print(
+                    "[story] character_aftermath_persisted",
+                    "character=",
+                    character.slug,
+                    "character_scene_id=",
+                    pending_scene.id,
+                    "source_scene_id=",
+                    pending_scene.source_scene_id,
+                    flush=True,
+                )
 
                 # Refresh character.state after persist_character_experience_updates()
                 # because that function may create/update CharacterState.
@@ -1836,20 +2063,6 @@ def collect_character_contributions(
 
                 pending_scene.state_after_json = character_state_snapshot(character)
                 pending_scene.save()
-
-                persist_character_experience_updates(
-                    world=world,
-                    resolved_scene_state={
-                        "cast": scene_state.cast_json or {},
-                    },
-                    experience_updates=[
-                        {
-                            "slug": character.slug,
-                            "experience_update": previous_scene_aftermath,
-                        }
-                    ],
-                    source_scene=pending_scene.source_scene,
-                )
 
         if include_debug:
             debug_entries.append({
@@ -2051,120 +2264,120 @@ def build_character_aftermath_context(
     }
 
 
-def extract_single_character_experience(context, character=None):
-    config = get_character_agent_config(character)
-    client = config["client"]
-    api = config["api"]
-    model = config["model"]
+# def extract_single_character_experience(context, character=None):
+#     config = get_character_agent_config(character)
+#     client = config["client"]
+#     api = config["api"]
+#     model = config["model"]
 
-    if api not in {"openai_responses", "grok_responses"}:
-        raise ValueError(f"Unsupported character experience API: {api}")
+#     if api not in {"openai_responses", "grok_responses"}:
+#         raise ValueError(f"Unsupported character experience API: {api}")
 
-    response = client.responses.create(
-        model=model,
-        instructions=CHARACTER_EXPERIENCE_SYSTEM_PROMPT,
-        input=[
-            {
-                "role": "developer",
-                "content": CHARACTER_EXPERIENCE_DEVELOPER_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": json.dumps(context, ensure_ascii=False, indent=2),
-            },
-        ],
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "single_character_experience_update",
-                "strict": True,
-                "schema": CHARACTER_EXPERIENCE_SCHEMA,
-            }
-        },
-    )
+#     response = client.responses.create(
+#         model=model,
+#         instructions=CHARACTER_EXPERIENCE_SYSTEM_PROMPT,
+#         input=[
+#             {
+#                 "role": "developer",
+#                 "content": CHARACTER_EXPERIENCE_DEVELOPER_PROMPT,
+#             },
+#             {
+#                 "role": "user",
+#                 "content": json.dumps(context, ensure_ascii=False, indent=2),
+#             },
+#         ],
+#         text={
+#             "format": {
+#                 "type": "json_schema",
+#                 "name": "single_character_experience_update",
+#                 "strict": True,
+#                 "schema": CHARACTER_EXPERIENCE_SCHEMA,
+#             }
+#         },
+#     )
 
-    if not response.output_text:
-        return _empty_character_experience_update()
+#     if not response.output_text:
+#         return _empty_character_experience_update()
 
-    try:
-        data = json.loads(response.output_text)
-    except json.JSONDecodeError as e:
-        print("CHARACTER EXPERIENCE RAW OUTPUT:")
-        print(response.output_text)
-        raise ValueError(
-            f"Character experience extractor returned malformed JSON: {e}"
-        ) from e
+#     try:
+#         data = json.loads(response.output_text)
+#     except json.JSONDecodeError as e:
+#         print("CHARACTER EXPERIENCE RAW OUTPUT:")
+#         print(response.output_text)
+#         raise ValueError(
+#             f"Character experience extractor returned malformed JSON: {e}"
+#         ) from e
 
-    if not isinstance(data, dict):
-        return _empty_character_experience_update()
+#     if not isinstance(data, dict):
+#         return _empty_character_experience_update()
 
-    normalized = _normalize_character_agent_response({
-        "previous_scene_aftermath": data,
-        "current_turn_reflection": {
-            "emotional_posture": "",
-            "active_pressure": "",
-            "anticipated_consequence": "",
-            "memory_or_belief_pressures": [],
-        },
-    })
+#     normalized = _normalize_character_agent_response({
+#         "previous_scene_aftermath": data,
+#         "current_turn_reflection": {
+#             "emotional_posture": "",
+#             "active_pressure": "",
+#             "anticipated_consequence": "",
+#             "memory_or_belief_pressures": [],
+#         },
+#     })
 
-    return (
-        normalized.get("previous_scene_aftermath")
-        or _empty_character_experience_update()
-    )
+#     return (
+#         normalized.get("previous_scene_aftermath")
+#         or _empty_character_experience_update()
+#     )
 
 
-def collect_single_character_experience_updates(
-    world,
-    resolved_scene_state,
-    final_draft,
-    scene_events,
-    character_contributions,
-):
-    cast = (resolved_scene_state or {}).get("cast", {})
-    updates = []
-
-    characters = (
-        Character.objects
-        .filter(world=world, is_active=True, is_player=False)
-        .select_related("profile", "state")
-    )
-
-    for character in characters:
-        cast_entry = cast.get(character.slug) or {}
-
-        if not _character_can_receive_aftermath(cast_entry):
-            continue
-
-        context = build_character_aftermath_context(
-            world=world,
-            character=character,
-            resolved_scene_state=resolved_scene_state,
-            final_draft=final_draft,
-            scene_events=scene_events,
-            character_contributions=character_contributions,
-        )
-
-        print(
-            "EXTRACTING CHARACTER EXPERIENCE:",
-            character.slug,
-            "direct_events=",
-            len(context["events_directly_perceived_by_observer"]),
-            "other_events=",
-            len(context["events_not_directly_perceived_by_observer"]),
-        )
-
-        experience_update = extract_single_character_experience(
-            context=context,
-            character=character,
-        )
-
-        updates.append({
-            "slug": character.slug,
-            "experience_update": experience_update,
-        })
-
-    return updates
+# def collect_single_character_experience_updates(
+#     world,
+#     resolved_scene_state,
+#     final_draft,
+#     scene_events,
+#     character_contributions,
+# ):
+#     cast = (resolved_scene_state or {}).get("cast", {})
+#     updates = []
+#
+#     characters = (
+#         Character.objects
+#         .filter(world=world, is_active=True, is_player=False)
+#         .select_related("profile", "state")
+#     )
+#
+#     for character in characters:
+#         cast_entry = cast.get(character.slug) or {}
+#
+#         if not _character_can_receive_aftermath(cast_entry):
+#             continue
+#
+#         context = build_character_aftermath_context(
+#             world=world,
+#             character=character,
+#             resolved_scene_state=resolved_scene_state,
+#             final_draft=final_draft,
+#             scene_events=scene_events,
+#             character_contributions=character_contributions,
+#         )
+#
+#         print(
+#             "EXTRACTING CHARACTER EXPERIENCE:",
+#             character.slug,
+#             "direct_events=",
+#             len(context["events_directly_perceived_by_observer"]),
+#             "other_events=",
+#             len(context["events_not_directly_perceived_by_observer"]),
+#         )
+#
+#         experience_update = extract_single_character_experience(
+#             context=context,
+#             character=character,
+#         )
+#
+#         updates.append({
+#             "slug": character.slug,
+#             "experience_update": experience_update,
+#         })
+#
+#     return updates
 
 CHARACTER_EXPERIENCE_SYSTEM_PROMPT = """
 You are updating one character's subjective experience after an approved scene.

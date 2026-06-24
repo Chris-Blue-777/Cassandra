@@ -723,6 +723,17 @@ def _merge_scene_state_updates(primary, secondary, valid_slugs=None, allow_tmp=T
     }
 
 def call_scene_participant_inference(context):
+
+    # turn user input + previous scene state into draft-time scene topology/cast/perception state.
+
+    # Cassandra and character-agents depend on this because they need to know:
+
+    # who is present
+    # who is nearby
+    # who can perceive what
+    # where people are
+    # what space/location is active
+
     system_prompt = """You are MissPots, a scene-state inference engine for a narrative system.
 
 Your job is to infer structured scene-state updates from the provided scene text.
