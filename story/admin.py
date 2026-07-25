@@ -1,6 +1,13 @@
 from django.contrib import admin
 from .models import (
     CharacterProfile,
+    CharacterVisualIdentity,
+    CharacterVisualIdentityVersion,
+    CharacterVisualReference,
+    GeneratedMediaAsset,
+    GeneratedMediaJob,
+    GeneratedMediaJobReference,
+    GeneratedMediaJobSubject,
     World,
     SceneState,
     Proposal,
@@ -9,20 +16,34 @@ from .models import (
     NarrativeMemory,
     CharacterState,
     CharacterPerception,
+    SubjectiveRelationshipEdge,
+    SubjectiveRelationshipEdgeChange,
     CharacterBelief,
     CharacterMemory,
-    CharacterScene)
+    CharacterScene,
+    StoryArc,
+    StoryArcUpdateProposal)
 
 admin.site.register(World)
 admin.site.register(SceneState)
 admin.site.register(Proposal)
 admin.site.register(CommittedScene)
 admin.site.register(Character)
+admin.site.register(CharacterVisualIdentity)
+admin.site.register(CharacterVisualIdentityVersion)
+admin.site.register(CharacterVisualReference)
+admin.site.register(GeneratedMediaJob)
+admin.site.register(GeneratedMediaJobReference)
+admin.site.register(GeneratedMediaJobSubject)
+admin.site.register(GeneratedMediaAsset)
 admin.site.register(NarrativeMemory)
 admin.site.register(CharacterProfile)
 admin.site.register(CharacterState)
 admin.site.register(CharacterPerception)
+admin.site.register(SubjectiveRelationshipEdge)
+admin.site.register(SubjectiveRelationshipEdgeChange)
 admin.site.register(CharacterBelief)
 admin.site.register(CharacterMemory)
 admin.site.register(CharacterScene)
-# Register your models here.
+admin.site.register(StoryArc)
+admin.site.register(StoryArcUpdateProposal)

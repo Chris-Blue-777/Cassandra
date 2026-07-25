@@ -1,0 +1,504 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Relationship Map · Cassandra</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=relationship-map-1">
+</head>
+<body>
+<div class="app-shell relationship-map-shell">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">World</span>
+                <strong>{{ active_world.name|default:"No world" }}</strong>
+            </div>
+
+            {% if observer %}
+                <div class="topbar-world">
+                    <span class="topbar-label">Observer</span>
+                    <strong>{{ observer.name }}</strong>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Scene
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'cast_page' %}'">
+                Cast
+            </button>
+        </div>
+    </div>
+
+    <div class="relationship-map-page">
+        <div class="panel relationship-map-header-panel">
+            <div>
+                <h1>Relationship Map</h1>
+                <p class="status-row-sub">
+                    A subjective social web: what the selected observer knows, suspects, remembers,
+                    and believes about the people around them.
+                </p>
+            </div>
+
+            <form method="get" action="{% url 'relationship_map' %}" class="observer-selector">
+                <label for="observer-select" class="topbar-label">Choose observer</label>
+                <div class="observer-selector-row">
+                    <select id="observer-select" name="observer">
+                        {% for character in characters %}
+                            <option value="{{ character.slug }}" {% if observer and character.id == observer.id %}selected{% endif %}>
+                                {{ character.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="secondary">View Map</button>
+                </div>
+            </form>
+        </div>
+
+        {% if not observer %}
+            <div class="panel">
+                <h2>No observer available</h2>
+                <p class="status-row-sub">Create an active character before viewing a relationship map.</p>
+            </div>
+        {% elif map_data %}
+            <div class="panel relationship-graph-panel">
+                <div class="relationship-map-section-heading">
+                    <h2>{{ observer.name }}’s known social web</h2>
+                    <span class="muted">
+                        {{ map_data.known_characters|length }} known node{{ map_data.known_characters|length|pluralize }},
+                        {{ map_data.graph_edges|length }} edge{{ map_data.graph_edges|length|pluralize }}
+                    </span>
+                </div>
+
+                {% if map_data.has_known_map %}
+                    <div class="relationship-graph-wrap">
+                        <svg
+                            class="relationship-graph"
+                            viewBox="0 0 {{ map_data.svg_width }} {{ map_data.svg_height }}"
+                            role="img"
+                            aria-label="{{ observer.name }}'s subjective relationship graph"
+                        >
+                            {% for edge in map_data.graph_edges %}
+                                <a
+                                    href="#{{ edge.target_anchor }}"
+                                    class="relationship-graph-edge-link relationship-graph-interactive"
+                                    role="link"
+                                    tabindex="0"
+                                    data-summary="{{ edge.summary|default:edge.label|escape }}"
+                                    data-title="{{ edge.title|default:edge.label|escape }}"
+                                    aria-label="{{ edge.aria_label|default:edge.summary|escape }}"
+                                >
+                                    <line
+                                        class="relationship-graph-edge-hitbox"
+                                        x1="{{ edge.x1|floatformat:1 }}"
+                                        y1="{{ edge.y1|floatformat:1 }}"
+                                        x2="{{ edge.x2|floatformat:1 }}"
+                                        y2="{{ edge.y2|floatformat:1 }}"
+                                    />
+                                    <line
+                                        class="relationship-graph-edge relationship-graph-edge-{{ edge.kind }}"
+                                        x1="{{ edge.x1|floatformat:1 }}"
+                                        y1="{{ edge.y1|floatformat:1 }}"
+                                        x2="{{ edge.x2|floatformat:1 }}"
+                                        y2="{{ edge.y2|floatformat:1 }}"
+                                    />
+                                    <text
+                                        class="relationship-graph-label relationship-graph-label-{{ edge.kind }}"
+                                        x="{{ edge.label_x|floatformat:1 }}"
+                                        y="{{ edge.label_y|floatformat:1 }}"
+                                    >
+                                        {{ edge.label|truncatechars:28 }}
+                                    </text>
+                                </a>
+                            {% endfor %}
+
+                            {% for node in map_data.graph_nodes %}
+                                <a
+                                    href="#{{ node.target_anchor }}"
+                                    class="relationship-graph-node-link relationship-graph-interactive"
+                                    role="link"
+                                    tabindex="0"
+                                    data-summary="{{ node.summary|escape }}"
+                                    data-title="{{ node.title|escape }}"
+                                    aria-label="{{ node.title|escape }}: {{ node.summary|escape }}"
+                                >
+                                    <g class="relationship-graph-node {% if node.is_observer %}relationship-graph-node-observer{% elif node.has_perception %}relationship-graph-node-known{% endif %}">
+                                        <circle
+                                            cx="{{ node.x|floatformat:1 }}"
+                                            cy="{{ node.y|floatformat:1 }}"
+                                            r="{% if node.is_observer %}38{% else %}30{% endif %}"
+                                        />
+                                        <text
+                                            x="{{ node.x|floatformat:1 }}"
+                                            y="{{ node.y|floatformat:1 }}"
+                                            text-anchor="middle"
+                                            dominant-baseline="middle"
+                                        >
+                                            {{ node.name|truncatechars:16 }}
+                                        </text>
+                                    </g>
+                                </a>
+                            {% endfor %}
+                        </svg>
+                        <div class="relationship-graph-bubble" hidden></div>
+                    </div>
+                {% else %}
+                    <div class="empty-state-box">
+                        {{ observer.name }} has no stored subjective relationship map yet.
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="relationship-map-grid">
+                <div class="panel">
+                    <div class="relationship-map-section-heading">
+                        <h2>Character dossiers</h2>
+                        <span class="muted">What {{ observer.name }} thinks of each known person.</span>
+                    </div>
+
+                    <ul class="relationship-card-list">
+                        {% for card in map_data.character_cards %}
+                            <li id="{{ card.anchor }}" class="relationship-card" tabindex="-1">
+                                <div class="relationship-card-title">
+                                    {{ card.character.name }}
+                                    {% if card.is_observer %}
+                                        <span class="muted">self</span>
+                                    {% endif %}
+                                </div>
+
+                                {% if card.perception %}
+                                    <p>{{ card.perception.summary|default:"No summary stored." }}</p>
+
+                                    {% if card.perception.knowledge_basis %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Basis:</span>
+                                            {{ card.perception.knowledge_basis }}
+                                        </p>
+                                    {% endif %}
+
+                                    {% if card.perception.last_change_summary %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Recent change:</span>
+                                            {{ card.perception.last_change_summary }}
+                                        </p>
+                                    {% endif %}
+
+                                    <div class="relationship-score-grid">
+                                        {% for score in card.scores %}
+                                            <div class="relationship-score">
+                                                <span class="relationship-score-label">{{ score.label }}</span>
+                                                <span class="relationship-score-value">{{ score.value|floatformat:2 }}</span>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+
+                                    {% if card.perception.open_questions_json %}
+                                        <div class="relationship-map-detail">
+                                            <div class="status-row-title small-title">Open questions</div>
+                                            <ul class="compact-debug-list">
+                                                {% for question in card.perception.open_questions_json %}
+                                                    <li>{{ question }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% endif %}
+                                {% else %}
+                                    <p class="muted">No direct dossier has formed yet.</p>
+                                {% endif %}
+
+                                {% if card.beliefs %}
+                                    <div class="relationship-map-detail">
+                                        <div class="status-row-title small-title">Beliefs involving {{ card.character.name }}</div>
+                                        <ul class="compact-debug-list">
+                                            {% for belief in card.beliefs %}
+                                                <li>
+                                                    {{ belief.belief }}
+                                                    <span class="muted">({{ belief.confidence|floatformat:2 }})</span>
+                                                    {% if belief.basis %}
+                                                        <br>
+                                                        <span class="muted">Basis: {{ belief.basis }}</span>
+                                                    {% endif %}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+
+                                {% if card.memories %}
+                                    <div class="relationship-map-detail">
+                                        <div class="status-row-title small-title">Memories involving {{ card.character.name }}</div>
+                                        <ul class="compact-debug-list">
+                                            {% for memory in card.memories %}
+                                                <li>
+                                                    {{ memory.content }}
+                                                    <span class="muted">({{ memory.memory_layer }})</span>
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div class="panel">
+                    <div class="relationship-map-section-heading">
+                        <h2>Social edges</h2>
+                        <span class="muted">How {{ observer.name }} understands relationships between people.</span>
+                    </div>
+
+                    {% if map_data.direct_relationship_cards or map_data.edge_cards or map_data.belief_edge_cards or map_data.pending_belief_edge_cards %}
+                        <ul class="relationship-card-list">
+                            {% for card in map_data.direct_relationship_cards %}
+                                <li id="{{ card.anchor }}" class="relationship-card relationship-edge-card relationship-direct-edge-card" tabindex="-1">
+                                    <div class="relationship-card-title">
+                                        {{ card.observer.name }} ↔ {{ card.target.name }}
+                                    </div>
+
+                                    <div class="relationship-edge-label">
+                                        {{ card.relationship_label }}
+                                    </div>
+
+                                    <p>{{ card.relationship_summary }}</p>
+
+                                    {% if card.perception.knowledge_basis %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Basis:</span>
+                                            {{ card.perception.knowledge_basis }}
+                                        </p>
+                                    {% endif %}
+
+                                    {% if card.perception.last_change_summary %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Recent change:</span>
+                                            {{ card.perception.last_change_summary }}
+                                        </p>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                            {% for card in map_data.edge_cards %}
+                                <li id="{{ card.anchor }}" class="relationship-card relationship-edge-card" tabindex="-1">
+                                    <div class="relationship-card-title">
+                                        {{ card.edge.subject_a.name }} ↔ {{ card.edge.subject_b.name }}
+                                    </div>
+
+                                    {% if card.edge.relationship_label %}
+                                        <div class="relationship-edge-label">{{ card.edge.relationship_label }}</div>
+                                    {% endif %}
+
+                                    <p>{{ card.edge.summary|default:"No edge summary stored." }}</p>
+
+                                    {% if card.edge.knowledge_basis %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Basis:</span>
+                                            {{ card.edge.knowledge_basis }}
+                                        </p>
+                                    {% endif %}
+
+                                    <p class="relationship-map-detail">
+                                        <span class="label">Confidence:</span>
+                                        {{ card.edge.confidence|floatformat:2 }}
+                                    </p>
+
+                                    {% if card.edge.last_change_summary %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Recent change:</span>
+                                            {{ card.edge.last_change_summary }}
+                                        </p>
+                                    {% endif %}
+
+                                    {% if card.edge.directional_notes_json %}
+                                        <div class="relationship-map-detail">
+                                            <div class="status-row-title small-title">Directional notes</div>
+                                            <ul class="compact-debug-list">
+                                                {% for key, value in card.edge.directional_notes_json.items %}
+                                                    {% if value %}
+                                                        <li><span class="muted">{{ key }}:</span> {{ value }}</li>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% endif %}
+
+                                    {% if card.edge.open_questions_json %}
+                                        <div class="relationship-map-detail">
+                                            <div class="status-row-title small-title">Open questions</div>
+                                            <ul class="compact-debug-list">
+                                                {% for question in card.edge.open_questions_json %}
+                                                    <li>{{ question }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% endif %}
+
+                                    {% if card.archives %}
+                                        <div class="relationship-map-detail">
+                                            <div class="status-row-title small-title">Edge Past / History</div>
+                                            <ul class="compact-debug-list">
+                                                {% for archive in card.archives %}
+                                                    <li>
+                                                        <span class="muted">{{ archive.change_layer }}</span>
+                                                        {{ archive.summary }}
+                                                        {% if archive.source_change_count %}
+                                                            <span class="muted">({{ archive.source_change_count }} changes)</span>
+                                                        {% endif %}
+                                                    </li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                            {% for card in map_data.belief_edge_cards %}
+                                <li id="{{ card.anchor }}" class="relationship-card relationship-edge-card relationship-belief-edge-card" tabindex="-1">
+                                    <div class="relationship-card-title">
+                                        {{ card.subject_a.name }} ↔ {{ card.subject_b.name }}
+                                    </div>
+
+                                    <div class="relationship-edge-label">{{ card.card_label }}</div>
+
+                                    <p>{{ card.belief.belief }}</p>
+
+                                    {% if card.belief.basis %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Basis:</span>
+                                            {{ card.belief.basis }}
+                                        </p>
+                                    {% endif %}
+
+                                    <p class="relationship-map-detail">
+                                        <span class="label">Confidence:</span>
+                                        {{ card.belief.confidence|floatformat:2 }}
+                                    </p>
+                                </li>
+                            {% endfor %}
+                            {% for card in map_data.pending_belief_edge_cards %}
+                                <li id="{{ card.anchor }}" class="relationship-card relationship-edge-card relationship-belief-edge-card relationship-pending-belief-edge-card" tabindex="-1">
+                                    <div class="relationship-card-title">
+                                        {{ card.subject_a.name }} ↔ {{ card.subject_b.name }}
+                                    </div>
+
+                                    <div class="relationship-edge-label">{{ card.card_label }}</div>
+
+                                    <p>{{ card.belief.belief }}</p>
+
+                                    {% if card.belief.basis %}
+                                        <p class="relationship-map-detail">
+                                            <span class="label">Basis:</span>
+                                            {{ card.belief.basis }}
+                                        </p>
+                                    {% endif %}
+
+                                    <p class="relationship-map-detail">
+                                        <span class="label">Confidence:</span>
+                                        {{ card.belief.confidence|floatformat:2 }}
+                                    </p>
+
+                                    <p class="relationship-map-detail muted">
+                                        This is waiting for the belief reducer before becoming an active belief or durable social edge.
+                                    </p>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <div class="empty-state-box">
+                            No relationship edges or inferred belief links are stored for {{ observer.name }} yet.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const graphWrap = document.querySelector(".relationship-graph-wrap");
+    const bubble = document.querySelector(".relationship-graph-bubble");
+    const graphItems = document.querySelectorAll(".relationship-graph-interactive");
+
+    if (!graphWrap || !bubble || !graphItems.length) return;
+
+    function bubbleText(link) {
+        const title = link.dataset.title || "";
+        const summary = link.dataset.summary || "";
+        return title && summary ? `${title}: ${summary}` : (summary || title);
+    }
+
+    function positionBubble(clientX, clientY) {
+        const wrapRect = graphWrap.getBoundingClientRect();
+        bubble.style.left = `${clientX - wrapRect.left + graphWrap.scrollLeft + 14}px`;
+        bubble.style.top = `${clientY - wrapRect.top + graphWrap.scrollTop + 14}px`;
+    }
+
+    function showBubble(link, event) {
+        const text = bubbleText(link);
+        if (!text) return;
+
+        bubble.textContent = text;
+        bubble.hidden = false;
+
+        if (event && typeof event.clientX === "number") {
+            positionBubble(event.clientX, event.clientY);
+        } else {
+            const rect = link.getBoundingClientRect();
+            positionBubble(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }
+    }
+
+    function hideBubble() {
+        bubble.hidden = true;
+    }
+
+    function jumpToGraphDetail(link) {
+        const href = link.getAttribute("href") || "";
+        if (!href.startsWith("#")) return;
+
+        const target = document.getElementById(href.slice(1));
+        if (!target) return;
+
+        target.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+        });
+        history.replaceState(null, "", href);
+
+        target.classList.add("relationship-card-highlight");
+        window.setTimeout(function () {
+            target.classList.remove("relationship-card-highlight");
+        }, 1400);
+    }
+
+    graphItems.forEach(function (link) {
+        link.addEventListener("mouseenter", function (event) {
+            showBubble(link, event);
+        });
+        link.addEventListener("mousemove", function (event) {
+            if (!bubble.hidden) positionBubble(event.clientX, event.clientY);
+        });
+        link.addEventListener("mouseleave", hideBubble);
+        link.addEventListener("focus", function () {
+            showBubble(link);
+        });
+        link.addEventListener("blur", hideBubble);
+        link.addEventListener("click", function (event) {
+            event.preventDefault();
+            hideBubble();
+            jumpToGraphDetail(link);
+        });
+    });
+});
+</script>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

@@ -1,0 +1,413 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · Create Video Job</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-video-1">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page wanda-media-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>Create Video Job</strong>
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}'">
+                Generated Media
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_visual_identities' %}'">
+                Wanda Visuals
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        {% if review_form %}
+            <section class="relationship-map-toolbar wanda-visual-toolbar">
+                <div>
+                    <h1>Video job packet</h1>
+                    <p>
+                        This saves a Wanda video job for the selected provider. The provider is called later from the Generated Media page, then Wanda saves the finished video locally.
+                    </p>
+                </div>
+                <div class="media-job-summary-pill">
+                    {% if selection.selected_character %}
+                        {{ selection.selected_character.name }}
+                    {% endif %}
+                    {% if selection.selected_version %}
+                        · v{{ selection.selected_version.version_number }}
+                        · {{ selection.selected_version.status }}
+                    {% endif %}
+                    · {{ selection.video_mode|default:"video" }}
+                </div>
+            </section>
+
+            <section class="wanda-media-review-grid">
+                <div class="relationship-map-card">
+                    <h2>Review and save</h2>
+
+                    <div class="runway-workflow-card">
+                        <h3>Provider frame workflow</h3>
+                        <p>
+                            Character identity is mandatory for every video job. Wanda carries identity through the saved subject packet and prompt.
+                            Image inputs are provider-specific frame/reference anchors.
+                        </p>
+                        <p>
+                            For a scene with multiple characters, the strongest identity-preserving path is to first create a shared scene image containing everyone together, then animate that completed still image. This gives the video provider one composed frame while Wanda still preserves the character subject bindings.
+                        </p>
+                    </div>
+
+                    <form method="post" class="wanda-visual-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="source" value="wanda_identity">
+                        {% if selection.selected_character %}
+                            <input type="hidden" name="character_slug" value="{{ selection.selected_character.slug }}">
+                        {% endif %}
+                        {% if selection.selected_version %}
+                            <input type="hidden" name="version_number" value="{{ selection.selected_version.version_number }}">
+                        {% endif %}
+                        {{ review_form.selected_reference_ids }}
+                        {{ review_form.primary_reference_id }}
+                        {{ review_form.original_prompt }}
+                        {{ review_form.original_negative_prompt }}
+
+                        {{ review_form.non_field_errors }}
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.title.id_for_label }}">Title</label>
+                            {{ review_form.title }}
+                            {{ review_form.title.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.provider.id_for_label }}">Video provider / model</label>
+                            {{ review_form.provider }}
+                            <div class="field-help">{{ review_form.provider.help_text }}</div>
+                            {{ review_form.provider.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.video_mode.id_for_label }}">Video mode</label>
+                            {{ review_form.video_mode }}
+                            <div class="field-help">{{ review_form.video_mode.help_text }}</div>
+                            {{ review_form.video_mode.errors }}
+                        </div>
+
+                        <section
+                            class="media-reference-selector"
+                            data-reference-selector
+                            data-reference-limit="{{ provider_reference_limit|default:2 }}"
+                        >
+                            <div class="media-reference-selector-header">
+                                <div>
+                                    <h3>Reference / first-frame asset</h3>
+                                    <p class="muted">
+                                        Choose frame/reference images according to the selected provider’s limit. These support motion and composition. Character identity remains locked by Wanda’s subject packet and prompt.
+                                    </p>
+                                </div>
+                                <span class="media-reference-count" data-reference-count></span>
+                            </div>
+
+                            {% if reference_options %}
+                                <div class="media-reference-grid">
+                                    {% for option in reference_options %}
+                                        {% with reference=option.reference %}
+                                            <article
+                                                class="media-reference-card {% if option.is_selected %}selected{% endif %}"
+                                                data-reference-card
+                                                data-reference-id="{{ reference.id }}"
+                                            >
+                                                {% if reference.url %}
+                                                    <a href="{{ reference.url }}" target="_blank" rel="noopener">
+                                                        <img src="{{ reference.url }}" alt="Reference asset {{ reference.id }}">
+                                                    </a>
+                                                {% else %}
+                                                    <div class="media-reference-missing-image">No preview</div>
+                                                {% endif %}
+
+                                                <div class="media-reference-card-body">
+                                                    <div class="media-reference-title">
+                                                        <strong>#{{ reference.id }} · {{ reference.kind|default:"reference" }}</strong>
+                                                        {% if reference.is_primary %}
+                                                            <span class="presence-inline present">Canonical primary</span>
+                                                        {% endif %}
+                                                    </div>
+
+                                                    {% if reference.caption %}
+                                                        <p>{{ reference.caption|linebreaksbr }}</p>
+                                                    {% endif %}
+
+                                                    <label class="media-reference-check">
+                                                        <input
+                                                            type="checkbox"
+                                                            data-reference-checkbox
+                                                            value="{{ reference.id }}"
+                                                            {% if option.is_selected %}checked{% endif %}
+                                                        >
+                                                        Use as frame reference
+                                                    </label>
+
+                                                    <label class="media-reference-primary">
+                                                        <input
+                                                            type="radio"
+                                                            name="job_primary_reference_choice"
+                                                            data-reference-primary
+                                                            value="{{ reference.id }}"
+                                                            {% if option.is_job_primary %}checked{% endif %}
+                                                        >
+                                                        Job primary / first frame
+                                                    </label>
+
+                                                    <div class="media-reference-order" data-reference-order></div>
+                                                </div>
+                                            </article>
+                                        {% endwith %}
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <p class="empty-state">
+                                    This visual identity version has no uploaded references yet. Use text-to-video, or upload a reference first for stronger continuity.
+                                </p>
+                            {% endif %}
+                        </section>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.prompt.id_for_label }}">Motion / video prompt</label>
+                            {{ review_form.prompt }}
+                            <div class="field-help">{{ review_form.prompt.help_text }}</div>
+                            {{ review_form.prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.negative_prompt.id_for_label }}">Negative prompt</label>
+                            {{ review_form.negative_prompt }}
+                            <div class="field-help">{{ review_form.negative_prompt.help_text }}</div>
+                            {{ review_form.negative_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.user_prompt_override.id_for_label }}">User override / extra direction</label>
+                            {{ review_form.user_prompt_override }}
+                            <div class="field-help">{{ review_form.user_prompt_override.help_text }}</div>
+                            {{ review_form.user_prompt_override.errors }}
+                        </div>
+
+                        <div class="chat-actions">
+                            <button type="submit">Save Video Job</button>
+                        </div>
+                    </form>
+                </div>
+
+                <aside class="wanda-visual-side">
+                    <div class="relationship-map-card">
+                        <h2>Provider setup</h2>
+                        <p class="muted">
+                            This page creates identity-constrained video packets for the selected provider. For multi-character scenes, a generated shared still usually gives the provider the clearest composed frame to preserve.
+                        </p>
+                        <dl class="agent-definition-list">
+                            <dt>Provider</dt>
+                            <dd>{{ prompt_packet.provider_label|default:prompt_packet.provider }}</dd>
+                            <dt>Model</dt>
+                            <dd>{{ prompt_packet.provider_options.model|default:"—" }}</dd>
+                            <dt>Duration</dt>
+                            <dd>{{ prompt_packet.provider_options.duration|default:"—" }} seconds</dd>
+                            <dt>Ratio</dt>
+                            <dd>{{ prompt_packet.provider_options.ratio|default:"—" }}</dd>
+                            <dt>Mode</dt>
+                            <dd>{{ prompt_packet.generation_mode|default:"—" }}</dd>
+                        </dl>
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Source</h2>
+                        <dl class="agent-definition-list">
+                            <dt>Source</dt>
+                            <dd>{{ selection.source }}</dd>
+                            <dt>Character</dt>
+                            <dd>{{ selection.selected_character.name|default:"—" }}</dd>
+                            <dt>Identity version</dt>
+                            <dd>
+                                {% if selection.selected_version %}
+                                    v{{ selection.selected_version.version_number }} · {{ selection.selected_version.status }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </dd>
+                        </dl>
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Saved packet preview</h2>
+                        <p class="muted">
+                            This is the durable packet the selected provider adapter will consume. Base64 image data is only assembled in memory at submission time.
+                        </p>
+                        <details open class="mini-folder">
+                            <summary>Prompt packet JSON</summary>
+                            <pre>{{ prompt_packet|prettyjson }}</pre>
+                        </details>
+                    </div>
+                </aside>
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">No video job draft is available.</p>
+            </section>
+        {% endif %}
+    </main>
+</div>
+<script>
+(function () {
+    const selector = document.querySelector("[data-reference-selector]");
+    if (!selector) {
+        return;
+    }
+
+    const selectedInput = document.getElementById("id_selected_reference_ids");
+    const primaryInput = document.getElementById("id_primary_reference_id");
+    const countLabel = selector.querySelector("[data-reference-count]");
+    const form = selector.closest("form");
+    const cards = Array.from(selector.querySelectorAll("[data-reference-card]"));
+    const providerInput = document.getElementById("id_provider");
+    const providerCaps = {
+        {% for provider in video_providers %}
+            "{{ provider.id }}": {{ provider.max_reference_assets|default:2 }}{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    };
+
+    function currentReferenceLimit() {
+        const selectedProvider = providerInput ? providerInput.value : "";
+        const providerLimit = providerCaps[selectedProvider];
+        const fallbackLimit = parseInt(selector.dataset.referenceLimit || "2", 10);
+        return parseInt(providerLimit || fallbackLimit || "2", 10);
+    }
+
+    let selectedOrder = (selectedInput.value || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .slice(0, currentReferenceLimit());
+
+    function checkedIdsInDomOrder() {
+        return cards
+            .filter((card) => card.querySelector("[data-reference-checkbox]").checked)
+            .map((card) => card.dataset.referenceId);
+    }
+
+    function syncReferenceSelection() {
+        const checkedIds = checkedIdsInDomOrder();
+        selectedOrder = selectedOrder.filter((referenceId) => checkedIds.includes(referenceId));
+        checkedIds.forEach((referenceId) => {
+            if (!selectedOrder.includes(referenceId)) {
+                selectedOrder.push(referenceId);
+            }
+        });
+        const referenceLimit = currentReferenceLimit();
+        selectedOrder = selectedOrder.slice(0, referenceLimit);
+
+        let primaryId = primaryInput.value || "";
+        if (!selectedOrder.includes(primaryId)) {
+            primaryId = selectedOrder[0] || "";
+        }
+
+        selectedInput.value = selectedOrder.join(",");
+        primaryInput.value = primaryId;
+
+        cards.forEach((card) => {
+            const referenceId = card.dataset.referenceId;
+            const checkbox = card.querySelector("[data-reference-checkbox]");
+            const radio = card.querySelector("[data-reference-primary]");
+            const orderLabel = card.querySelector("[data-reference-order]");
+            const isSelected = selectedOrder.includes(referenceId);
+
+            checkbox.checked = isSelected;
+            radio.checked = referenceId === primaryId && isSelected;
+            radio.disabled = !isSelected;
+            card.classList.toggle("selected", isSelected);
+            card.classList.toggle("job-primary", referenceId === primaryId && isSelected);
+            const selectedIndex = selectedOrder.indexOf(referenceId);
+            orderLabel.textContent = (
+                isSelected
+                    ? `Selected as ${
+                        selectedIndex === 0
+                            ? "first frame"
+                            : selectedIndex === 1 && referenceLimit === 2
+                                ? "last frame"
+                                : `reference #${selectedIndex + 1}`
+                    }`
+                    : "Not selected"
+            );
+        });
+
+        if (countLabel) {
+            countLabel.textContent = `${selectedOrder.length} selected · limit ${referenceLimit}`;
+        }
+    }
+
+    cards.forEach((card) => {
+        const checkbox = card.querySelector("[data-reference-checkbox]");
+        const radio = card.querySelector("[data-reference-primary]");
+        const referenceId = card.dataset.referenceId;
+
+        checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+                selectedOrder = [
+                    ...selectedOrder.filter((value) => value !== referenceId),
+                    referenceId,
+                ].slice(0, currentReferenceLimit());
+            } else {
+                selectedOrder = selectedOrder.filter((value) => value !== referenceId);
+            }
+            primaryInput.value = selectedOrder[0] || "";
+            syncReferenceSelection();
+        });
+
+        radio.addEventListener("change", () => {
+            if (radio.checked) {
+                selectedOrder = [
+                    referenceId,
+                    ...selectedOrder.filter((value) => value !== referenceId),
+                ].slice(0, currentReferenceLimit());
+                primaryInput.value = referenceId;
+                syncReferenceSelection();
+            }
+        });
+    });
+
+    if (form) {
+        form.addEventListener("submit", syncReferenceSelection);
+    }
+    if (providerInput) {
+        providerInput.addEventListener("change", syncReferenceSelection);
+    }
+
+    syncReferenceSelection();
+}());
+</script>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

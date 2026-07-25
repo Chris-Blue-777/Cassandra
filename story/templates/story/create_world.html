@@ -1,0 +1,70 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create World — Cassandra</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}">
+</head>
+<body>
+    <div class="app-shell page-shell cast-management-shell">
+        <header class="topbar cast-management-topbar">
+            <div class="topbar-left">
+                <div>
+                    <div class="topbar-world">
+                        <span class="topbar-label">Worlds</span>
+                        <strong>Create New World</strong>
+                        {% if active_world %}
+                            <span class="muted">· current: {{ active_world.name }}</span>
+                        {% endif %}
+                    </div>
+                    <p class="cast-page-intro">
+                        Worlds keep separate casts, scenes, memories, arcs, and media workspaces.
+                    </p>
+                </div>
+            </div>
+            <nav class="topbar-right cast-management-actions" aria-label="World form navigation">
+                {% include "story/_theme_toggle.html" %}
+                <a class="button-link secondary" href="{% url 'scene_page' %}">Back to Scene</a>
+            </nav>
+        </header>
+
+        <main class="cast-management-page">
+            <section class="panel cast-form-panel">
+                <div class="cast-page-heading">
+                    <div>
+                        <h1>Create World</h1>
+                        <p class="muted">
+                            Start a clean narrative container, then add characters and begin scenes inside it.
+                        </p>
+                    </div>
+                    {% if worlds %}
+                        <span class="cast-count-pill">
+                            {{ worlds|length }} existing world{{ worlds|length|pluralize }}
+                        </span>
+                    {% endif %}
+                </div>
+
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="message-box {{ message.tags }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
+                <form class="cast-form-card" method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+
+                    <div class="cast-form-actions">
+                        <button type="submit">Create World</button>
+                        <a class="button-link secondary" href="{% url 'scene_page' %}">Cancel</a>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

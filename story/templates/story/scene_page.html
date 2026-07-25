@@ -7,13 +7,31 @@
 <head>
     <meta charset="utf-8">
     <title>Cassandra Prototype</title>
-    <link rel="stylesheet" href="{% static 'story/styles.css' %}">
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=topbar-wrap-2">
 </head>
 <body>
 <div class="app-shell">
 
     {% if error %}
         <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    {% if not active_world %}
+        <section class="panel empty-state-box world-empty-state">
+            <h1>No worlds yet</h1>
+            <p>
+                Create a world to give Cassandra a narrative container for characters,
+                scenes, memories, arcs, and media.
+            </p>
+            <a class="button-link" href="{% url 'create_world' %}">Create New World</a>
+        </section>
     {% endif %}
 
     {% if active_world %}
@@ -84,14 +102,28 @@
                 </select>
                 <button type="submit" class="secondary">Switch</button>
             </form>
+            <a class="button-link secondary" href="{% url 'create_world' %}">
+                New World
+            </a>
         </div>
 
         <div class="topbar-right">
-            <button id="theme-toggle" type="button" class="secondary theme-toggle" aria-label="Toggle dark mode">
-                <span class="theme-toggle-icon" aria-hidden="true">☾</span>
-            </button>
+            <form method="post" action="{% url 'generate_draft' %}" class="topbar-form">
+                {% csrf_token %}
+                <input type="hidden" name="surprise_me" value="true">
+                <button type="submit" class="secondary surprise-me-button">
+                    Surprise Me
+                </button>
+            </form>
+            {% include "story/_theme_toggle.html" %}
             <button type="button" class="secondary" onclick="window.location.href='{% url 'cast_page' %}'">
                 Cast
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'relationship_map' %}'">
+                Relationship Map
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_visual_identities' %}'">
+                Wanda Visuals
             </button>
         </div>
     </div>
@@ -104,9 +136,247 @@
         <div class="scene-location-line">
             {{ scene_state.location|default:"No location set." }}
         </div>
+        {% if current_narrative_frame %}
+            <div class="coverage-line">
+                <span class="label">Coverage:</span>
+                {{ current_narrative_frame.coverage_mode|default:"split_screen" }}
+                {% if current_narrative_frame.reader_visible_space_ids %}
+                    · visible: {{ current_narrative_frame.reader_visible_space_ids|join:", " }}
+                {% endif %}
+                {% if current_narrative_frame.resolved_space_ids %}
+                    · resolved: {{ current_narrative_frame.resolved_space_ids|join:", " }}
+                {% endif %}
+            </div>
+        {% endif %}
     {% else %}
         <div class="scene-location-line muted">No location set.</div>
     {% endif %}
+
+    <div class="panel-block story-arc-block">
+        <h3>Story Arcs</h3>
+
+        {% if active_story_arcs %}
+            <ul class="status-list">
+                {% for arc in active_story_arcs %}
+                    <li class="status-row story-arc-row">
+                        <div class="status-row-main">
+                            <div class="status-row-title story-arc-title">
+                                {{ arc.title }}
+                                <span class="muted">· {{ arc.scope }} · priority {{ arc.priority|floatformat:2 }}</span>
+                            </div>
+
+                            {% if arc.current_phase or arc.horizon %}
+                                <div class="status-row-sub">
+                                    {% if arc.current_phase %}
+                                        <span class="label">Phase:</span> {{ arc.current_phase }}
+                                    {% endif %}
+                                    {% if arc.horizon %}
+                                        {% if arc.current_phase %}<br>{% endif %}
+                                        <span class="label">Horizon:</span> {{ arc.horizon }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if arc.summary %}
+                                <div class="status-row-sub story-arc-summary">
+                                    {{ arc.summary|linebreaksbr }}
+                                </div>
+                            {% endif %}
+
+                            {% if arc.narrator_guidance %}
+                                <div class="status-row-sub relationship-map-detail">
+                                    <span class="label">Cassandra:</span>
+                                    {{ arc.narrator_guidance|linebreaksbr }}
+                                </div>
+                            {% endif %}
+
+                            {% if arc.subject_slugs_json %}
+                                <div class="status-row-sub relationship-map-detail">
+                                    <span class="label">Subjects:</span>
+                                    {{ arc.subject_slugs_json|join:", " }}
+                                </div>
+                            {% endif %}
+
+                            {% if arc.constraints or arc.character_lenses_json %}
+                                <details class="mini-folder">
+                                    <summary>Arc details</summary>
+
+                                    {% if arc.constraints %}
+                                        <p><span class="label">Limits:</span></p>
+                                        <div class="text-box">{{ arc.constraints|linebreaksbr }}</div>
+                                    {% endif %}
+
+                                    {% if arc.character_lenses_json %}
+                                        <p><span class="label">Character lenses:</span></p>
+                                        <pre>{{ arc.character_lenses_json|prettyjson }}</pre>
+                                    {% endif %}
+                                </details>
+                            {% endif %}
+
+                            <div class="story-arc-actions">
+                                <a
+                                    class="secondary button-link"
+                                    href="{% url 'scene_page' %}?edit_arc={{ arc.id }}#story-arc-editor"
+                                >
+                                    Edit
+                                </a>
+                                <form method="post" action="{% url 'update_story_arc_status' arc.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="dormant">
+                                    <button type="submit" class="secondary">Dormant</button>
+                                </form>
+                                <form method="post" action="{% url 'update_story_arc_status' arc.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="resolved">
+                                    <button type="submit" class="secondary">Resolve</button>
+                                </form>
+                            </div>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">No active story arcs.</div>
+        {% endif %}
+
+        {% if edit_story_arc_form and edit_story_arc %}
+            <details class="story-arc-create" id="story-arc-editor" open>
+                <summary>Edit Story Arc: {{ edit_story_arc.title }}</summary>
+                <form method="post" action="{% url 'edit_story_arc' edit_story_arc.id %}" class="story-arc-form">
+                    {% csrf_token %}
+
+                    <label for="{{ edit_story_arc_form.title.id_for_label }}">Title</label>
+                    {{ edit_story_arc_form.title }}
+
+                    <label for="{{ edit_story_arc_form.slug.id_for_label }}">Slug</label>
+                    {{ edit_story_arc_form.slug }}
+                    <div class="field-help">{{ edit_story_arc_form.slug.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.scope.id_for_label }}">Scope</label>
+                    {{ edit_story_arc_form.scope }}
+
+                    <label for="{{ edit_story_arc_form.subject_slugs.id_for_label }}">Subject slugs</label>
+                    {{ edit_story_arc_form.subject_slugs }}
+                    <div class="field-help">{{ edit_story_arc_form.subject_slugs.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.summary.id_for_label }}">Summary</label>
+                    {{ edit_story_arc_form.summary }}
+                    <div class="field-help">{{ edit_story_arc_form.summary.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.narrator_guidance.id_for_label }}">Cassandra guidance</label>
+                    {{ edit_story_arc_form.narrator_guidance }}
+                    <div class="field-help">{{ edit_story_arc_form.narrator_guidance.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.ooc_tag.id_for_label }}">OOC submission tag</label>
+                    {{ edit_story_arc_form.ooc_tag }}
+                    <div class="field-help">{{ edit_story_arc_form.ooc_tag.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.current_phase.id_for_label }}">Current phase</label>
+                    {{ edit_story_arc_form.current_phase }}
+
+                    <label for="{{ edit_story_arc_form.horizon.id_for_label }}">Horizon</label>
+                    {{ edit_story_arc_form.horizon }}
+
+                    <label for="{{ edit_story_arc_form.constraints.id_for_label }}">Constraints</label>
+                    {{ edit_story_arc_form.constraints }}
+
+                    <label for="{{ edit_story_arc_form.priority.id_for_label }}">Priority</label>
+                    {{ edit_story_arc_form.priority }}
+                    <div class="field-help">{{ edit_story_arc_form.priority.help_text }}</div>
+
+                    <label for="{{ edit_story_arc_form.character_lenses.id_for_label }}">Character lenses</label>
+                    {{ edit_story_arc_form.character_lenses }}
+                    <div class="field-help">{{ edit_story_arc_form.character_lenses.help_text }}</div>
+
+                    <div class="story-arc-actions">
+                        <button type="submit">Save Arc</button>
+                        <a class="secondary button-link" href="{% url 'scene_page' %}">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </details>
+        {% endif %}
+
+        {% if story_arc_form %}
+            <details class="story-arc-create">
+                <summary>Create Story Arc</summary>
+                <form method="post" action="{% url 'create_story_arc' %}" class="story-arc-form">
+                    {% csrf_token %}
+
+                    <label for="{{ story_arc_form.title.id_for_label }}">Title</label>
+                    {{ story_arc_form.title }}
+
+                    <label for="{{ story_arc_form.slug.id_for_label }}">Slug</label>
+                    {{ story_arc_form.slug }}
+                    <div class="field-help">{{ story_arc_form.slug.help_text }}</div>
+
+                    <label for="{{ story_arc_form.scope.id_for_label }}">Scope</label>
+                    {{ story_arc_form.scope }}
+
+                    <label for="{{ story_arc_form.subject_slugs.id_for_label }}">Subject slugs</label>
+                    {{ story_arc_form.subject_slugs }}
+                    <div class="field-help">{{ story_arc_form.subject_slugs.help_text }}</div>
+
+                    <label for="{{ story_arc_form.summary.id_for_label }}">Summary</label>
+                    {{ story_arc_form.summary }}
+                    <div class="field-help">{{ story_arc_form.summary.help_text }}</div>
+
+                    <label for="{{ story_arc_form.narrator_guidance.id_for_label }}">Cassandra guidance</label>
+                    {{ story_arc_form.narrator_guidance }}
+                    <div class="field-help">{{ story_arc_form.narrator_guidance.help_text }}</div>
+
+                    <label for="{{ story_arc_form.ooc_tag.id_for_label }}">OOC submission tag</label>
+                    {{ story_arc_form.ooc_tag }}
+                    <div class="field-help">{{ story_arc_form.ooc_tag.help_text }}</div>
+
+                    <label for="{{ story_arc_form.current_phase.id_for_label }}">Current phase</label>
+                    {{ story_arc_form.current_phase }}
+
+                    <label for="{{ story_arc_form.horizon.id_for_label }}">Horizon</label>
+                    {{ story_arc_form.horizon }}
+
+                    <label for="{{ story_arc_form.constraints.id_for_label }}">Constraints</label>
+                    {{ story_arc_form.constraints }}
+
+                    <label for="{{ story_arc_form.priority.id_for_label }}">Priority</label>
+                    {{ story_arc_form.priority }}
+                    <div class="field-help">{{ story_arc_form.priority.help_text }}</div>
+
+                    <label for="{{ story_arc_form.character_lenses.id_for_label }}">Character lenses</label>
+                    {{ story_arc_form.character_lenses }}
+                    <div class="field-help">{{ story_arc_form.character_lenses.help_text }}</div>
+
+                    <button type="submit">Activate Arc</button>
+                </form>
+            </details>
+        {% endif %}
+
+        {% if inactive_story_arcs %}
+            <details class="story-arc-archive">
+                <summary>Dormant / Resolved Arcs</summary>
+                <ul class="compact-debug-list">
+                    {% for arc in inactive_story_arcs %}
+                        <li>
+                            <strong>{{ arc.title }}</strong>
+                            <span class="muted">({{ arc.status }})</span>
+                            <a
+                                class="secondary button-link"
+                                href="{% url 'scene_page' %}?edit_arc={{ arc.id }}#story-arc-editor"
+                            >
+                                Edit
+                            </a>
+                            <form method="post" action="{% url 'update_story_arc_status' arc.id %}" class="inline-arc-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="status" value="active">
+                                <button type="submit" class="secondary">Reactivate</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </details>
+        {% endif %}
+    </div>
 
     {% if narrative_memories %}
     <div class="panel-block">
@@ -116,6 +386,9 @@
             {% for memory in narrative_memories %}
                 <li class="status-row">
                     <div class="status-row-sub">
+                        {% if memory.memory_layer %}
+                            <span class="muted">{{ memory.memory_layer }}</span><br>
+                        {% endif %}
                         {{ memory.content|linebreaksbr }}
                     </div>
                 </li>
@@ -142,6 +415,37 @@
                         </div>
                     {% endif %}
 
+                    {% if row.knowledge_basis %}
+                        <div class="status-row-sub relationship-map-detail">
+                            <span class="label">Basis:</span>
+                            {{ row.knowledge_basis }}
+                        </div>
+                    {% endif %}
+
+                    {% if row.last_change_summary %}
+                        <div class="status-row-sub relationship-map-detail">
+                            <span class="label">Recent change:</span>
+                            {{ row.last_change_summary }}
+                        </div>
+                    {% endif %}
+
+                    {% if row.relationship_archives %}
+                        <div class="relationship-map-detail">
+                            <div class="status-row-title small-title">Relationship Past / History</div>
+                            <ul class="compact-debug-list">
+                                {% for archive in row.relationship_archives %}
+                                    <li>
+                                        <span class="muted">{{ archive.change_layer }}</span>
+                                        {{ archive.summary }}
+                                        {% if archive.source_change_count %}
+                                            <span class="muted">({{ archive.source_change_count }} changes)</span>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+
                     <div class="relationship-score-grid">
     {% for score in row.scores %}
         <div class="relationship-score">
@@ -165,6 +469,39 @@
         </div>
     {% endfor %}
 </div>
+
+{% if row.beliefs %}
+    <div class="relationship-map-detail">
+        <div class="status-row-title small-title">Beliefs</div>
+        <ul class="compact-debug-list">
+            {% for belief in row.beliefs %}
+                <li>
+                    {{ belief.belief }}
+                    <span class="muted">({{ belief.belief_status }}, {{ belief.confidence|floatformat:2 }})</span>
+                    {% if belief.basis %}
+                        <br>
+                        <span class="muted">Basis: {{ belief.basis }}</span>
+                    {% endif %}
+                    {% if belief.related_subject_slugs_json %}
+                        <br>
+                        <span class="muted">Related: {{ belief.related_subject_slugs_json|join:", " }}</span>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+{% if row.open_questions %}
+    <div class="relationship-map-detail">
+        <div class="status-row-title small-title">Open questions</div>
+        <ul class="compact-debug-list">
+            {% for question in row.open_questions %}
+                <li>{{ question }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}
 
 {% if not row.has_recent_change %}
     <div class="status-row-sub muted">
@@ -222,84 +559,9 @@
 
                         <div class="status-row-sub">
                             {% if contribution.scene_contribution %}
-                                {% with c=contribution.scene_contribution %}
-                                    {% if c.attempted_action %}
-                                        <strong>Action:</strong> {{ c.attempted_action }}<br>
-                                    {% endif %}
-
-                                    {% if c.attempted_dialogue %}
-                                        <strong>Dialogue:</strong> “{{ c.attempted_dialogue }}”<br>
-                                    {% endif %}
-
-                                    {% if c.internal_intent %}
-                                        <strong>Intent:</strong> {{ c.internal_intent }}<br>
-                                    {% endif %}
-
-                                    {% if c.emotional_posture %}
-                                        <strong>Posture:</strong> {{ c.emotional_posture }}<br>
-                                    {% endif %}
-
-                                    {% if c.confidence %}
-                                        <strong>Confidence:</strong> {{ c.confidence }}<br>
-                                    {% endif %}
-
-                                    {% if c.target_slugs %}
-                                        <strong>Targets:</strong>
-                                        {{ c.target_slugs|join:", " }}<br>
-                                    {% endif %}
-
-                                    {% if c.interrupt_priority %}
-                                        <strong>Interrupt:</strong> {{ c.interrupt_priority }}<br>
-                                    {% endif %}
-
-                                    {% if c.required_visibility %}
-                                        <strong>Visibility:</strong> {{ c.required_visibility }}<br>
-                                    {% endif %}
-
-                                    {% if c.required_audibility %}
-                                        <strong>Audibility:</strong> {{ c.required_audibility }}<br>
-                                    {% endif %}
-
-                                    {% if c.body_motion %}
-                                        <strong>Body Motion:</strong> {{ c.body_motion }}<br>
-                                    {% endif %}
-
-                                    {% if c.observed_focus %}
-                                        <strong>Observed Focus:</strong>
-                                        <ul class="compact-debug-list">
-                                            {% for item in c.observed_focus %}
-                                                <li>{{ item }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% endif %}
-
-                                    {% if c.beliefs_in_play %}
-                                        <strong>Beliefs in Play:</strong>
-                                        <ul class="compact-debug-list">
-                                            {% for item in c.beliefs_in_play %}
-                                                <li>{{ item }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% endif %}
-
-                                    {% if c.memory_pressures %}
-                                        <strong>Memory Pressures:</strong>
-                                        <ul class="compact-debug-list">
-                                            {% for item in c.memory_pressures %}
-                                                <li>{{ item }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% endif %}
-
-                                    {% if c.proposed_effects %}
-                                        <strong>Proposed Effects:</strong>
-                                        <ul class="compact-debug-list">
-                                            {% for item in c.proposed_effects %}
-                                                <li>{{ item }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% endif %}
-                                {% endwith %}
+                                {% include "story/_character_contribution_fields.html" with c=contribution.scene_contribution %}
+                            {% elif contribution.attempted_action or contribution.attempted_dialogue or contribution.internal_intent or contribution.emotional_posture %}
+                                {% include "story/_character_contribution_fields.html" with c=contribution %}
                             {% else %}
                                 <span class="empty-state">No scene contribution.</span>
                             {% endif %}
@@ -484,8 +746,11 @@
                 <h4>Character Contributions</h4>
                 <pre>{{ proposal.character_contributions_json|prettyjson }}</pre>
 
-                <h4>Scene State Update</h4>
+                <h4>MissPots Pre-Draft Scene State Update</h4>
                 <pre>{{ proposal.scene_state_update_json|prettyjson }}</pre>
+
+                <h4>Cassandra Post-Draft Consequence Update</h4>
+                <pre>{{ proposal.cassandra_scene_state_update_json|prettyjson }}</pre>
 
                 <h4>Prior Scene State</h4>
                 <pre>{{ proposal.prior_scene_state_json|prettyjson }}</pre>
@@ -515,7 +780,8 @@
 
             <div class="chat-window compact-chat-window">
                 <div class="chat-thread chat-history" id="chat-history">
-                    {% for scene in committed_scenes reversed %}
+                    {% for scene_row in committed_scene_rows reversed %}
+                        {% with scene=scene_row.scene %}
                         <div class="chat-bubble chat-bubble-user">
                             <div class="chat-meta">
                                 <span class="chat-speaker">You</span>
@@ -524,6 +790,8 @@
                                 {{ scene.user_text|linebreaksbr }}
                             </div>
                         </div>
+
+                        {% include "story/_scene_feed_character_contributions.html" with contributions=scene_row.character_contributions %}
 
                         <div class="chat-bubble chat-bubble-cassandra">
                             <div class="chat-meta">
@@ -544,7 +812,87 @@
                             <div class="chat-message-body">
                                 {{ scene.cassandra_text|linebreaksbr }}
                             </div>
+
+                            <details class="mini-folder scene-media-folder">
+                                <summary>
+                                    Wanda media
+                                    {% if scene_row.media_jobs %}
+                                        · {{ scene_row.media_jobs|length }} job{{ scene_row.media_jobs|length|pluralize }}
+                                    {% endif %}
+                                </summary>
+
+                                {% if scene_row.media_jobs %}
+                                    <div class="scene-media-job-list">
+                                        {% for media_job in scene_row.media_jobs %}
+                                            <a class="scene-media-job-pill" href="{% url 'wanda_media_jobs' %}?job={{ media_job.id }}">
+                                                Job #{{ media_job.id }}
+                                                · {{ media_job.get_status_display }}
+                                                {% if media_job.target_character %}
+                                                    · {{ media_job.target_character.name }}
+                                                {% elif media_job.subjects.all %}
+                                                    ·
+                                                    {% for subject in media_job.subjects.all %}
+                                                        {{ subject.character.name }}{% if not forloop.last %}, {% endif %}
+                                                    {% endfor %}
+                                                {% endif %}
+                                                {% if media_job.visual_identity_version %}
+                                                    · v{{ media_job.visual_identity_version.version_number }}
+                                                {% endif %}
+                                            </a>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <p class="empty-state">No media jobs have been created from this approved scene yet.</p>
+                                {% endif %}
+
+                                {% if media_portrait_character_options %}
+                                    <div class="scene-media-actions">
+                                        <form method="get" action="{% url 'review_scene_image_media_job' %}" class="scene-media-form">
+                                            <input type="hidden" name="scene_id" value="{{ scene.id }}">
+                                            <button type="submit">Review Scene Image</button>
+                                        </form>
+
+                                        <form method="get" action="{% url 'review_portrait_media_job' %}" class="scene-media-form">
+                                            <input type="hidden" name="source" value="approved_scene">
+                                            <input type="hidden" name="scene_id" value="{{ scene.id }}">
+                                            <label>
+                                                Character / current visual version
+                                                <select name="character_slug">
+                                                    {% for option in media_portrait_character_options %}
+                                                        <option value="{{ option.slug }}">
+                                                            {{ option.name }} · v{{ option.version_number }} · {{ option.version_status }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                            <button type="submit" class="secondary">Review Scene Portrait</button>
+                                        </form>
+
+                                        <form method="post" action="{% url 'quick_create_portrait_media_job' %}" class="scene-media-form">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="source" value="approved_scene">
+                                            <input type="hidden" name="scene_id" value="{{ scene.id }}">
+                                            <label>
+                                                Character / current visual version
+                                                <select name="character_slug">
+                                                    {% for option in media_portrait_character_options %}
+                                                        <option value="{{ option.slug }}">
+                                                            {{ option.name }} · v{{ option.version_number }} · {{ option.version_status }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                            <button type="submit">Quick Create Scene Portrait</button>
+                                        </form>
+                                    </div>
+                                {% else %}
+                                    <p class="empty-state">
+                                        Save a character visual identity version before creating scene portraits.
+                                    </p>
+                                {% endif %}
+                            </details>
                         </div>
+                        {% endwith %}
                     {% endfor %}
 
                     {% if proposal %}
@@ -557,11 +905,28 @@
                             </div>
                         </div>
 
+                        {% if not proposal.is_approved %}
+                            {% include "story/_scene_feed_character_contributions.html" with contributions=proposal.character_contributions_json %}
+                        {% endif %}
+
                         <div class="chat-bubble chat-bubble-cassandra">
                             <div class="chat-meta">
                                 <span class="chat-speaker">Cassandra</span>
                                 {% if proposal.is_approved %}
                                     <span class="chat-state-tag">Approved</span>
+                                    {% if latest_proposal_committed_scene %}
+                                        <form
+                                            method="post"
+                                            action="{% url 'delete_committed_scene' latest_proposal_committed_scene.id %}"
+                                            class="inline-delete-form"
+                                            onsubmit="return confirm('Delete this scene and every later scene? This rewinds the story and removes associated memories and character scene records.');"
+                                        >
+                                            {% csrf_token %}
+                                            <button type="submit" class="danger subtle-danger">
+                                                Delete From Here
+                                            </button>
+                                        </form>
+                                    {% endif %}
                                 {% else %}
                                     <span class="chat-state-tag">Pending</span>
                                 {% endif %}
@@ -571,6 +936,83 @@
                                 {{ proposal.draft|linebreaksbr }}
 
                                 {% if not proposal.is_approved %}
+                                    {% if pending_story_arc_update_proposals %}
+                                        <details class="story-arc-draft-alert">
+                                            <summary>
+                                                Cassandra suggested {{ pending_story_arc_update_proposals|length }} arc update{{ pending_story_arc_update_proposals|length|pluralize }}
+                                                {% with first_arc_update=pending_story_arc_update_proposals.0 %}
+                                                    {% if first_arc_update.source_scene %}
+                                                        from turn {{ first_arc_update.source_scene.turn_number }}
+                                                    {% endif %}
+                                                {% endwith %}
+                                            </summary>
+                                            <p class="muted">
+                                                Apply an update now if you want Cassandra’s arc direction to change. If you continue without applying it, the suggestion will be skipped.
+                                            </p>
+
+                                            <div class="story-arc-proposal-list draft-story-arc-proposal-list">
+                                                {% for arc_update in pending_story_arc_update_proposals %}
+                                                    <article class="status-row story-arc-proposal-card">
+                                                        <div class="status-row-main">
+                                                            <div class="status-row-title story-arc-title">
+                                                                {{ arc_update.story_arc.title }}
+                                                                <span class="muted">
+                                                                    · {{ arc_update.proposed_status }}
+                                                                    {% if arc_update.horizon_reached %}· horizon reached{% endif %}
+                                                                </span>
+                                                            </div>
+
+                                                            {% if arc_update.evidence_summary %}
+                                                                <div class="status-row-sub">
+                                                                    <span class="label">Evidence:</span>
+                                                                    {{ arc_update.evidence_summary|linebreaksbr }}
+                                                                </div>
+                                                            {% endif %}
+
+                                                            {% if arc_update.rationale %}
+                                                                <div class="status-row-sub">
+                                                                    <span class="label">Why:</span>
+                                                                    {{ arc_update.rationale|linebreaksbr }}
+                                                                </div>
+                                                            {% endif %}
+
+                                                            <details class="mini-folder">
+                                                                <summary>Proposed arc state</summary>
+                                                                <dl class="agent-definition-list">
+                                                                    <dt>Status</dt>
+                                                                    <dd>{{ arc_update.current_status }} → {{ arc_update.proposed_status }}</dd>
+                                                                    <dt>Phase</dt>
+                                                                    <dd>{{ arc_update.current_phase|default:"—" }} → {{ arc_update.proposed_phase|default:"—" }}</dd>
+                                                                    <dt>Horizon</dt>
+                                                                    <dd>{{ arc_update.current_horizon|default:"—" }} → {{ arc_update.proposed_horizon|default:"—" }}</dd>
+                                                                    <dt>Summary</dt>
+                                                                    <dd>{{ arc_update.proposed_summary|default:"—"|linebreaksbr }}</dd>
+                                                                    <dt>Cassandra guidance</dt>
+                                                                    <dd>{{ arc_update.proposed_narrator_guidance|default:"—"|linebreaksbr }}</dd>
+                                                                    <dt>Constraints</dt>
+                                                                    <dd>{{ arc_update.proposed_constraints|default:"—"|linebreaksbr }}</dd>
+                                                                </dl>
+                                                            </details>
+
+                                                            <div class="story-arc-actions">
+                                                                <form method="post" action="{% url 'decide_story_arc_update_proposal' arc_update.id %}">
+                                                                    {% csrf_token %}
+                                                                    <input type="hidden" name="decision" value="apply">
+                                                                    <button type="submit">Apply Update</button>
+                                                                </form>
+                                                                <form method="post" action="{% url 'decide_story_arc_update_proposal' arc_update.id %}">
+                                                                    {% csrf_token %}
+                                                                    <input type="hidden" name="decision" value="skip">
+                                                                    <button type="submit" class="secondary">Skip</button>
+                                                                </form>
+                                                            </div>
+                                                        </div>
+                                                    </article>
+                                                {% endfor %}
+                                            </div>
+                                        </details>
+                                    {% endif %}
+
                                     <div class="chat-actions">
                                         <button type="button" class="secondary" onclick="openEditMode('{{ proposal.id }}')">
                                             Edit
@@ -578,6 +1020,13 @@
                                         <form method="post" action="{% url 'approve_draft' proposal.id %}">
                                             {% csrf_token %}
                                             <button type="submit">Approve</button>
+                                        </form>
+                                        <form method="post" action="{% url 'generate_draft' %}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="surprise_me" value="true">
+                                            <button type="submit" class="secondary surprise-me-button">
+                                                Surprise Me
+                                            </button>
                                         </form>
                                     </div>
                                 {% endif %}
@@ -622,9 +1071,27 @@
                 <div class="chat-composer-box">
                     <form method="post" action="{% url 'generate_draft' %}">
                         {% csrf_token %}
-                        <textarea name="user_input" placeholder="Enter the next scene beat..."></textarea>
+                        <textarea
+                            id="scene-beat-input"
+                            name="user_input"
+                            placeholder="Enter the next scene beat..."
+                            {% if active_arc_ooc_tag_prefill %}data-arc-ooc-prefill="true"{% endif %}
+                        >{{ active_arc_ooc_tag_prefill }}</textarea>
+                        {% if active_arc_ooc_tags %}
+                            <p class="arc-ooc-note">
+                                Active story arc OOC tag{{ active_arc_ooc_tags|length|pluralize }} will be included with your submission.
+                            </p>
+                        {% endif %}
                         <div class="chat-composer-actions">
                             <button type="submit">Send</button>
+                            <button
+                                type="submit"
+                                name="surprise_me"
+                                value="true"
+                                class="secondary surprise-me-button"
+                            >
+                                Surprise Me
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -684,6 +1151,9 @@
                                         <dt>Camera Scope</dt>
                                         <dd>{{ proposal.proposed_scene_state_json.narrative_frame.camera_scope|default:"—" }}</dd>
 
+                                        <dt>Coverage Mode</dt>
+                                        <dd>{{ proposal.proposed_scene_state_json.narrative_frame.coverage_mode|default:"split_screen" }}</dd>
+
                                         <dt>Active Spaces</dt>
                                         <dd>
                                             {% if proposal.proposed_scene_state_json.narrative_frame.active_space_ids %}
@@ -692,7 +1162,43 @@
                                                 —
                                             {% endif %}
                                         </dd>
+
+                                        <dt>Resolved Spaces</dt>
+                                        <dd>
+                                            {% if proposal.proposed_scene_state_json.narrative_frame.resolved_space_ids %}
+                                                {{ proposal.proposed_scene_state_json.narrative_frame.resolved_space_ids|join:", " }}
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </dd>
+
+                                        <dt>Reader Visible Spaces</dt>
+                                        <dd>
+                                            {% if proposal.proposed_scene_state_json.narrative_frame.reader_visible_space_ids %}
+                                                {{ proposal.proposed_scene_state_json.narrative_frame.reader_visible_space_ids|join:", " }}
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </dd>
+
+                                        <dt>Reveal Policy</dt>
+                                        <dd>{{ proposal.proposed_scene_state_json.narrative_frame.reveal_policy|default:"—" }}</dd>
                                     </dl>
+
+                                    {% if proposal.proposed_scene_state_json.narrative_frame.cue_channels %}
+                                        <h5>Cue Channels</h5>
+                                        <ul class="compact-debug-list">
+                                            {% for channel in proposal.proposed_scene_state_json.narrative_frame.cue_channels %}
+                                                <li>
+                                                    {{ channel.from_space_id }} → {{ channel.to_space_id }}
+                                                    <span class="muted">({{ channel.access }})</span>
+                                                    {% if channel.description %}
+                                                        <br>{{ channel.description }}
+                                                    {% endif %}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
                                 {% else %}
                                     <dl class="agent-definition-list">
                                         <dt>Location</dt>
@@ -882,6 +1388,17 @@
 
                                             <dt>Outcome</dt>
                                             <dd>{{ event.outcome|default:"—" }}</dd>
+
+                                            <dt>Space</dt>
+                                            <dd>{{ event.space_id|default:"—" }}</dd>
+
+                                            <dt>Reader Visibility</dt>
+                                            <dd>{{ event.reader_visibility|default:"shown" }}</dd>
+
+                                            {% if event.cue_summary %}
+                                                <dt>Cue</dt>
+                                                <dd>{{ event.cue_summary }}</dd>
+                                            {% endif %}
 
                                             <dt>Perceived By</dt>
                                             <dd>
@@ -1257,7 +1774,7 @@
 
                             {% if ctx.other_characters %}
                                 <div class="agent-section">
-                                    <h4>Other Characters Sent</h4>
+	                                    <h4>Subjective Other-Character Profiles Sent</h4>
 
                                     {% for character in ctx.other_characters %}
                                         <details class="mini-folder">
@@ -1269,30 +1786,49 @@
                                                 {% endif %}
                                             </summary>
 
-                                            <dl class="agent-definition-list">
-                                                <dt>Archetype</dt>
-                                                <dd>{{ character.archetype|default:"—" }}</dd>
+	                                            <dl class="agent-definition-list">
+	                                                <dt>Mental Profile Source</dt>
+	                                                <dd>{{ character.mental_profile.source|default:"—" }}</dd>
 
-                                                <dt>Gender</dt>
-                                                <dd>{{ character.gender|default:"—" }}</dd>
+	                                                <dt>Summary</dt>
+	                                                <dd>{{ character.mental_profile.summary|default:"—"|linebreaksbr }}</dd>
 
-                                                <dt>Pronouns</dt>
-                                                <dd>
-                                                    {{ character.pronouns.subject|default:"—" }}
-                                                    /
-                                                    {{ character.pronouns.object|default:"—" }}
-                                                </dd>
+	                                                <dt>Basis</dt>
+	                                                <dd>{{ character.mental_profile.knowledge_basis|default:"—"|linebreaksbr }}</dd>
 
-                                                <dt>Description</dt>
-                                                <dd>{{ character.description|default:"—"|linebreaksbr }}</dd>
+	                                                <dt>Recent Change</dt>
+	                                                <dd>{{ character.mental_profile.recent_change|default:"—"|linebreaksbr }}</dd>
 
-                                                <dt>Profile Summary</dt>
-                                                <dd>{{ character.profile_summary|default:"—"|linebreaksbr }}</dd>
-                                            </dl>
-                                            <details class="raw-json-folder">
-                                                <summary>Raw Other Character JSON</summary>
-                                                <pre>{{ character|prettyjson }}</pre>
-                                            </details>
+	                                                <dt>Local Access</dt>
+	                                                <dd>
+	                                                    {{ character.scene_access.local_presence|default:"—" }}
+	                                                    /
+	                                                    {{ character.scene_access.perception_scope|default:"—" }}
+	                                                </dd>
+	                                            </dl>
+
+	                                            {% if character.mental_profile.beliefs_involving_character %}
+	                                                <h5>Beliefs involving this character</h5>
+	                                                <ul class="compact-debug-list">
+	                                                    {% for belief in character.mental_profile.beliefs_involving_character %}
+	                                                        <li>{{ belief.belief }}</li>
+	                                                    {% endfor %}
+	                                                </ul>
+	                                            {% endif %}
+
+	                                            {% if character.mental_profile.memories_involving_character %}
+	                                                <h5>Memories involving this character</h5>
+	                                                <ul class="compact-debug-list">
+	                                                    {% for memory in character.mental_profile.memories_involving_character %}
+	                                                        <li>{{ memory.content }}</li>
+	                                                    {% endfor %}
+	                                                </ul>
+	                                            {% endif %}
+
+	                                            <details class="raw-json-folder">
+	                                                <summary>Raw Subjective Profile JSON</summary>
+	                                                <pre>{{ character|prettyjson }}</pre>
+	                                            </details>
 
 
                                         </details>
@@ -1326,6 +1862,24 @@
 
                                             <dt>Internal Intent</dt>
                                             <dd>{{ c.internal_intent|default:"—" }}</dd>
+
+                                            <dt>Emotional Strategy</dt>
+                                            <dd>{{ c.emotional_strategy|default:"—" }}</dd>
+
+                                            <dt>Unspoken Avoidance</dt>
+                                            <dd>{{ c.unspoken_avoidance|default:"—" }}</dd>
+
+                                            <dt>Desired Next Moment</dt>
+                                            <dd>{{ c.desired_next_moment|default:"—" }}</dd>
+
+                                            <dt>Uninterrupted Followthrough</dt>
+                                            <dd>{{ c.uninterrupted_followthrough|default:"—" }}</dd>
+
+                                            <dt>Resistance Response</dt>
+                                            <dd>{{ c.resistance_response|default:"—" }}</dd>
+
+                                            <dt>Pressure Channel</dt>
+                                            <dd>{{ c.pressure_channel|default:"—" }}</dd>
 
                                             <dt>Emotional Posture</dt>
                                             <dd>{{ c.emotional_posture|default:"—" }}</dd>
@@ -1482,6 +2036,10 @@
                                                     {% if memory.related_character_slug %}
                                                         <span class="muted">({{ memory.related_character_slug }})</span>
                                                     {% endif %}
+                                                    {% if memory.related_character_slugs %}
+                                                        <br>
+                                                        <span class="muted">Related: {{ memory.related_character_slugs|join:", " }}</span>
+                                                    {% endif %}
                                                 </li>
                                             {% endfor %}
                                         </ul>
@@ -1513,7 +2071,22 @@
 
                                                 <dl class="agent-definition-list">
                                                     <dt>Summary</dt>
-                                                    <dd>{{ p.summary|default:"—" }}</dd>
+                                                    <dd>{{ p.change_summary|default:p.summary|default:"—" }}</dd>
+
+                                                    <dt>Revised Summary</dt>
+                                                    <dd>{{ p.revised_summary|default:"—" }}</dd>
+
+                                                    <dt>Basis</dt>
+                                                    <dd>{{ p.knowledge_basis|default:"—" }}</dd>
+
+                                                    <dt>Open Questions</dt>
+                                                    <dd>
+                                                        {% if p.open_questions %}
+                                                            {{ p.open_questions|join:", " }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </dd>
 
                                                     <dt>Impression</dt>
                                                     <dd>{{ p.impression_json.summary|default:"—" }}</dd>
@@ -1546,14 +2119,22 @@
                                                     <th>Subject</th>
                                                     <th>Belief</th>
                                                     <th>Confidence</th>
+                                                    <th>Basis</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {% for belief in out.previous_scene_aftermath.beliefs %}
                                                     <tr>
-                                                        <td>{{ belief.subject_slug|default:belief.subject_type }}</td>
+                                                        <td>
+                                                            {{ belief.subject_slug|default:belief.subject_type }}
+                                                            {% if belief.related_subject_slugs %}
+                                                                <br>
+                                                                <span class="muted">Related: {{ belief.related_subject_slugs|join:", " }}</span>
+                                                            {% endif %}
+                                                        </td>
                                                         <td>{{ belief.belief }}</td>
                                                         <td>{{ belief.confidence }}</td>
+                                                        <td>{{ belief.basis|default:"—" }}</td>
                                                     </tr>
                                                 {% endfor %}
                                             </tbody>
@@ -1579,6 +2160,9 @@
                                         {% for memory in ctx.recent_character_memories.data %}
                                             <li>
                                                 <span class="muted">{{ memory.memory_type }}</span>
+                                                {% if memory.memory_layer %}
+                                                    <span class="muted">· {{ memory.memory_layer }}</span>
+                                                {% endif %}
                                                 {{ memory.content }}
                                             </li>
                                         {% endfor %}
@@ -1600,14 +2184,22 @@
                                             <th>Subject</th>
                                             <th>Belief</th>
                                             <th>Confidence</th>
+                                            <th>Basis</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {% for belief in ctx.beliefs.data %}
                                             <tr>
-                                                <td>{{ belief.subject_slug|default:belief.subject_type }}</td>
+                                                <td>
+                                                    {{ belief.subject_slug|default:belief.subject_type }}
+                                                    {% if belief.related_subject_slugs %}
+                                                        <br>
+                                                        <span class="muted">Related: {{ belief.related_subject_slugs|join:", " }}</span>
+                                                    {% endif %}
+                                                </td>
                                                 <td>{{ belief.belief }}</td>
                                                 <td>{{ belief.confidence }}</td>
+                                                <td>{{ belief.basis|default:"—" }}</td>
                                             </tr>
                                         {% endfor %}
                                     </tbody>
@@ -1693,6 +2285,21 @@
                                             <dl class="agent-definition-list">
                                                 <dt>Summary</dt>
                                                 <dd>{{ p.summary|default:"—" }}</dd>
+
+                                                <dt>Basis</dt>
+                                                <dd>{{ p.knowledge_basis|default:"—" }}</dd>
+
+                                                <dt>Last Change</dt>
+                                                <dd>{{ p.last_change_summary|default:"—" }}</dd>
+
+                                                <dt>Open Questions</dt>
+                                                <dd>
+                                                    {% if p.open_questions %}
+                                                        {{ p.open_questions|join:", " }}
+                                                    {% else %}
+                                                        —
+                                                    {% endif %}
+                                                </dd>
 
                                                 <dt>Impression</dt>
                                                 <dd>{{ p.impression.summary|default:"—" }}</dd>
@@ -1784,6 +2391,12 @@ function closeEditMode(proposalId) {
 <script>
 document.addEventListener("DOMContentLoaded", function () {
     const container = document.getElementById("chat-history");
+    const composer = document.querySelector("textarea[data-arc-ooc-prefill='true']");
+
+    if (composer && document.activeElement !== composer) {
+        composer.focus();
+        composer.setSelectionRange(0, 0);
+    }
 
     if (!container) return;
 
@@ -1812,45 +2425,6 @@ document.addEventListener("DOMContentLoaded", function () {
         childList: true,
         subtree: true,
     });
-});
-</script>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const body = document.body;
-    const button = document.getElementById("theme-toggle");
-    const icon = button ? button.querySelector(".theme-toggle-icon") : null;
-
-    if (!button || !icon) return;
-
-    const savedTheme = localStorage.getItem("theme");
-
-    if (savedTheme === "dark") {
-        body.classList.add("dark-mode");
-    }
-
-    updateThemeButton();
-
-    button.addEventListener("click", function () {
-        body.classList.toggle("dark-mode");
-
-        const isDark = body.classList.contains("dark-mode");
-        localStorage.setItem("theme", isDark ? "dark" : "light");
-
-        updateThemeButton();
-    });
-
-    function updateThemeButton() {
-        const isDark = body.classList.contains("dark-mode");
-        icon.textContent = isDark ? "☀" : "☾";
-        button.setAttribute(
-            "aria-label",
-            isDark ? "Switch to light mode" : "Switch to dark mode"
-        );
-        button.setAttribute(
-            "title",
-            isDark ? "Light mode" : "Dark mode"
-        );
-    }
 });
 </script>
 <script>
@@ -1946,5 +2520,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 });
 </script>
+{% include "story/_theme_script.html" %}
 </body>
 </html>

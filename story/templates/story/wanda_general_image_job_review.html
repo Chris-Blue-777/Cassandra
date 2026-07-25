@@ -1,0 +1,197 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · {% if edit_job %}Edit{% else %}Create{% endif %} General Image Job</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-general-image-1">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page wanda-media-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>{% if edit_job %}Edit General Image Job #{{ edit_job.id }}{% else %}Create General Image Job{% endif %}</strong>
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}'">
+                Generated Media
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_visual_identities' %}'">
+                Wanda Visuals
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        {% if review_form %}
+            <section class="relationship-map-toolbar wanda-visual-toolbar">
+                <div>
+                    <h1>{% if edit_job %}Edit general image{% else %}General image{% endif %}</h1>
+                    <p>
+                        {% if edit_job %}
+                            Update this standalone Wanda image job before sending it back to a provider.
+                        {% else %}
+                            Create a standalone Wanda image job from a freeform prompt and optional reference images.
+                        {% endif %}
+                        This job is not tied to any approved scene or character visual identity.
+                    </p>
+                </div>
+                <div class="media-job-summary-pill">
+                    {% if edit_job %}
+                        {{ existing_reference_count }} attached ref{% if existing_reference_count != 1 %}s{% endif %}
+                    {% else %}
+                        {{ uploaded_reference_count }} uploaded ref{% if uploaded_reference_count != 1 %}s{% endif %}
+                    {% endif %}
+                    {% if provider_reference_cap %}
+                        · cap {{ provider_reference_cap }}
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="wanda-media-review-grid">
+                <div class="relationship-map-card">
+                    <h2>{% if edit_job %}Edit and save{% else %}Review and save{% endif %}</h2>
+
+                    <form method="post" enctype="multipart/form-data" class="wanda-visual-form">
+                        {% csrf_token %}
+                        {{ review_form.original_prompt }}
+                        {{ review_form.original_negative_prompt }}
+                        {{ review_form.non_field_errors }}
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.title.id_for_label }}">Title</label>
+                            {{ review_form.title }}
+                            {{ review_form.title.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.provider.id_for_label }}">Image provider / model</label>
+                            {{ review_form.provider }}
+                            <div class="field-help">{{ review_form.provider.help_text }}</div>
+                            {{ review_form.provider.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.style_mode.id_for_label }}">Style</label>
+                            {{ review_form.style_mode }}
+                            <div class="field-help">{{ review_form.style_mode.help_text }}</div>
+                            {{ review_form.style_mode.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.custom_style_prompt.id_for_label }}">Custom style direction</label>
+                            {{ review_form.custom_style_prompt }}
+                            <div class="field-help">{{ review_form.custom_style_prompt.help_text }}</div>
+                            {{ review_form.custom_style_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.reference_asset_limit.id_for_label }}">Reference image limit</label>
+                            {{ review_form.reference_asset_limit }}
+                            <div class="field-help">{{ review_form.reference_asset_limit.help_text }}</div>
+                            {{ review_form.reference_asset_limit.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="id_reference_files">Reference images</label>
+                            {% if existing_references %}
+                                <div class="wanda-reference-list">
+                                    {% for reference in existing_references %}
+                                        <div class="wanda-reference-card">
+                                            {% if reference.file %}
+                                                <img src="{{ reference.file.url }}" alt="General reference {{ forloop.counter }}">
+                                            {% endif %}
+                                            <p>
+                                                Existing reference #{{ forloop.counter }}
+                                            </p>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                            <input
+                                id="id_reference_files"
+                                type="file"
+                                name="reference_files"
+                                accept="image/*"
+                                multiple
+                            >
+                            <div class="field-help">
+                                Optional. These are job-scoped visual references, not character identity references.
+                                {% if edit_job %}Uploading more files will add them to the existing attached references.{% endif %}
+                                They will be sent only with this media job.
+                            </div>
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.prompt.id_for_label }}">Freeform image prompt</label>
+                            {{ review_form.prompt }}
+                            <div class="field-help">{{ review_form.prompt.help_text }}</div>
+                            {{ review_form.prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.negative_prompt.id_for_label }}">Negative prompt</label>
+                            {{ review_form.negative_prompt }}
+                            <div class="field-help">{{ review_form.negative_prompt.help_text }}</div>
+                            {{ review_form.negative_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.user_prompt_override.id_for_label }}">Extra direction</label>
+                            {{ review_form.user_prompt_override }}
+                            <div class="field-help">{{ review_form.user_prompt_override.help_text }}</div>
+                            {{ review_form.user_prompt_override.errors }}
+                        </div>
+
+                        <div class="provider-button-row">
+                            <button type="submit">
+                                {% if edit_job %}Update General Image Job{% else %}Create General Image Job{% endif %}
+                            </button>
+                            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}'">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <aside class="relationship-map-card">
+                    <h2>Saved packet preview</h2>
+                    <p class="muted">
+                        The saved job will remain scene-less and character-less. Uploaded references are attached to this job only and appear in the job packet on the Generated Media page.
+                    </p>
+                    <details class="mini-folder" open>
+                        <summary>Prompt packet</summary>
+                        <pre>{{ prompt_packet|prettyjson }}</pre>
+                    </details>
+                </aside>
+            </section>
+        {% endif %}
+    </main>
+</div>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

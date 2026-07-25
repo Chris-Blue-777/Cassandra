@@ -1,0 +1,468 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · Review Scene Image Job</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-scene-image-1">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page wanda-media-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>Review Scene Image Job</strong>
+                {% if edit_job %}
+                    <span class="muted">· editing #{{ edit_job.id }}</span>
+                {% endif %}
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}'">
+                Generated Media
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        {% if review_form %}
+            <section class="relationship-map-toolbar wanda-visual-toolbar">
+                <div>
+                    <h1>
+                        {% if edit_job %}
+                            Edit scene image job #{{ edit_job.id }}
+                        {% else %}
+                            Multi-character scene image
+                        {% endif %}
+                    </h1>
+                    <p>
+                        {% if edit_job %}
+                            Revise this saved job’s subjects, scene excerpt, style, reference limit, and prompt before retrying generation.
+                        {% else %}
+                            Bind character slugs in this approved scene to their saved Wanda visual identities, then create one shared image job.
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="media-job-summary-pill">
+                    Turn {{ scene.turn_number }}
+                    · {{ prompt_packet.visual_subjects|length }} subject{% if prompt_packet.visual_subjects|length != 1 %}s{% endif %}
+                    · {{ prompt_packet.selected_reference_count|default:0 }} ref{% if prompt_packet.selected_reference_count != 1 %}s{% endif %}
+                </div>
+            </section>
+
+            <section class="wanda-media-review-grid">
+                <div class="relationship-map-card">
+                    <h2>Review and save</h2>
+
+                    <div class="runway-workflow-card good-path">
+                        <h3>Build the shared still first</h3>
+                        <p>
+                            For a Mallory-and-Tom video, this is step one: create one image where both characters already occupy the same scene.
+                        </p>
+                        <p>
+                            After the image is generated, open the asset and choose <strong>Create scene animation</strong>. Runway will use the shared image as its first frame; other video providers can use their own tailored workflow as they are added.
+                        </p>
+                    </div>
+
+                    <form method="post" class="wanda-visual-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="scene_id" value="{{ scene.id }}">
+                        {{ review_form.original_prompt }}
+                        {{ review_form.original_negative_prompt }}
+
+                        {{ review_form.non_field_errors }}
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.title.id_for_label }}">Title</label>
+                            {{ review_form.title }}
+                            {{ review_form.title.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.provider.id_for_label }}">Image provider / model</label>
+                            {{ review_form.provider }}
+                            <div class="field-help">{{ review_form.provider.help_text }}</div>
+                            {{ review_form.provider.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.subject_slugs.id_for_label }}">Visual subjects</label>
+                            {{ review_form.subject_slugs }}
+                            <div class="field-help">{{ review_form.subject_slugs.help_text }}</div>
+                            {{ review_form.subject_slugs.errors }}
+                        </div>
+
+                        <div class="scene-subject-picker">
+                            {% for option in subject_options %}
+                                <span class="scene-media-job-pill {% if option.is_selected %}present{% endif %}">
+                                    {{ option.name }} · {{ option.slug }} · v{{ option.version_number }}
+                                </span>
+                            {% empty %}
+                                <p class="empty-state">No characters have saved visual identity versions yet.</p>
+                            {% endfor %}
+                        </div>
+
+                        <section class="media-reference-selector" data-scene-reference-selector>
+                            <div class="media-reference-selector-header">
+                                <div>
+                                    <h3>Character references</h3>
+                                    <p>
+                                        Choose which reference images Wanda should send for each character.
+                                        The first selected reference per character becomes that character's primary identity anchor.
+                                    </p>
+                                </div>
+                                <span class="media-reference-count" data-scene-reference-count></span>
+                            </div>
+
+                            {% if prompt_packet.visual_subjects %}
+                                {% for subject in prompt_packet.visual_subjects %}
+                                    <details class="mini-folder" open data-subject-reference-group data-subject-slug="{{ subject.slug }}">
+                                        <summary>
+                                            {{ subject.name }} · {{ subject.slug }}
+                                            {% if subject.visual_identity.version_number %}
+                                                · v{{ subject.visual_identity.version_number }}
+                                            {% endif %}
+                                        </summary>
+
+                                        {% if subject.reference_options %}
+                                            <div class="media-reference-grid">
+                                                {% for option in subject.reference_options %}
+                                                    <article
+                                                        class="media-reference-card {% if option.is_selected %}selected{% endif %} {% if option.is_subject_primary %}job-primary{% endif %}"
+                                                        data-scene-reference-card
+                                                        data-subject-slug="{{ subject.slug }}"
+                                                        data-reference-id="{{ option.reference.id }}"
+                                                    >
+                                                        {% if option.reference.url %}
+                                                            <img src="{{ option.reference.url }}" alt="{{ subject.name }} reference {{ option.reference.id }}">
+                                                        {% else %}
+                                                            <div class="media-reference-missing-image">No preview</div>
+                                                        {% endif %}
+
+                                                        <div class="media-reference-card-body">
+                                                            <div class="media-reference-title">
+                                                                Ref #{{ option.reference.id }}
+                                                                {% if option.reference.kind %}· {{ option.reference.kind }}{% endif %}
+                                                            </div>
+                                                            {% if option.reference.caption %}
+                                                                <p>{{ option.reference.caption|truncatechars:110 }}</p>
+                                                            {% endif %}
+
+                                                            <label class="media-reference-check">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    name="subject_reference_ids__{{ subject.slug }}"
+                                                                    value="{{ option.reference.id }}"
+                                                                    data-scene-reference-checkbox
+                                                                    {% if option.is_selected %}checked{% endif %}
+                                                                >
+                                                                Use for {{ subject.name }}
+                                                            </label>
+
+                                                            <label class="media-reference-primary">
+                                                                <input
+                                                                    type="radio"
+                                                                    name="subject_primary_reference_id__{{ subject.slug }}"
+                                                                    value="{{ option.reference.id }}"
+                                                                    data-scene-reference-primary
+                                                                    {% if option.is_subject_primary %}checked{% endif %}
+                                                                    {% if not option.is_selected %}disabled{% endif %}
+                                                                >
+                                                                Primary for {{ subject.name }}
+                                                            </label>
+
+                                                            <div class="media-reference-order" data-scene-reference-order>
+                                                                {% if option.is_selected %}
+                                                                    Selected{% if option.job_reference_order %} #{{ option.job_reference_order }}{% endif %}{% if option.is_subject_primary %} · character primary{% endif %}
+                                                                {% else %}
+                                                                    Not selected
+                                                                {% endif %}
+                                                            </div>
+                                                        </div>
+                                                    </article>
+                                                {% endfor %}
+                                            </div>
+                                        {% else %}
+                                            <p class="empty-state">No reference assets are saved for {{ subject.name }} yet.</p>
+                                        {% endif %}
+                                    </details>
+                                {% endfor %}
+                            {% else %}
+                                <p class="empty-state">
+                                    Select one or more visual subjects to choose their references.
+                                </p>
+                            {% endif %}
+                        </section>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.scene_excerpt.id_for_label }}">Scene excerpt to depict</label>
+                            {{ review_form.scene_excerpt }}
+                            <div class="field-help">{{ review_form.scene_excerpt.help_text }}</div>
+                            {{ review_form.scene_excerpt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.style_mode.id_for_label }}">Visual style</label>
+                            {{ review_form.style_mode }}
+                            <div class="field-help">{{ review_form.style_mode.help_text }}</div>
+                            {{ review_form.style_mode.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.custom_style_prompt.id_for_label }}">Custom style note</label>
+                            {{ review_form.custom_style_prompt }}
+                            <div class="field-help">{{ review_form.custom_style_prompt.help_text }}</div>
+                            {{ review_form.custom_style_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.reference_asset_limit.id_for_label }}">Total reference asset limit</label>
+                            {{ review_form.reference_asset_limit }}
+                            <div class="field-help">{{ review_form.reference_asset_limit.help_text }}</div>
+                            {{ review_form.reference_asset_limit.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.prompt.id_for_label }}">Base scene image prompt</label>
+                            {{ review_form.prompt }}
+                            <div class="field-help">{{ review_form.prompt.help_text }}</div>
+                            {{ review_form.prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.negative_prompt.id_for_label }}">Negative prompt</label>
+                            {{ review_form.negative_prompt }}
+                            <div class="field-help">{{ review_form.negative_prompt.help_text }}</div>
+                            {{ review_form.negative_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.user_prompt_override.id_for_label }}">User override / extra direction</label>
+                            {{ review_form.user_prompt_override }}
+                            <div class="field-help">{{ review_form.user_prompt_override.help_text }}</div>
+                            {{ review_form.user_prompt_override.errors }}
+                        </div>
+
+                        <div class="chat-actions">
+                            <button type="submit">
+                                {% if edit_job %}
+                                    Update Scene Image Job
+                                {% else %}
+                                    Save Scene Image Job
+                                {% endif %}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <aside class="wanda-visual-side">
+                    <div class="relationship-map-card">
+                        <h2>References that will be sent</h2>
+                        <p class="muted">
+                            Only checked references are attached to the provider request.
+                            Visual subjects without checked references still appear in the prompt as characters, but no reference image is sent for them.
+                        </p>
+                        {% if prompt_packet.visual_subjects %}
+                            <div class="compact-debug-list">
+                                {% for subject in prompt_packet.visual_subjects %}
+                                    <details class="mini-folder" open>
+                                        <summary>
+                                            {{ subject.name }} · {{ subject.slug }}
+                                            {% if subject.visual_identity.version_number %}
+                                                · v{{ subject.visual_identity.version_number }}
+                                            {% endif %}
+                                        </summary>
+                                        {% if subject.selected_references %}
+                                            <ul>
+                                                {% for reference in subject.selected_references %}
+                                                    <li>
+                                                        Ref #{{ reference.id }}
+                                                        · order {{ reference.job_reference_order }}
+                                                        {% if reference.kind %}· {{ reference.kind }}{% endif %}
+                                                    </li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% else %}
+                                            <p class="muted">No reference images will be sent for this subject.</p>
+                                        {% endif %}
+                                    </details>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="empty-state">No visual subjects are currently bound.</p>
+                        {% endif %}
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Debug packet preview</h2>
+                        <p class="muted">
+                            This preview is scrubbed to show selected references only.
+                        </p>
+                        <details class="mini-folder">
+                            <summary>Prompt packet JSON</summary>
+                            <pre>{{ prompt_packet_preview|prettyjson }}</pre>
+                        </details>
+                    </div>
+                </aside>
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">No scene image job is available to review.</p>
+            </section>
+        {% endif %}
+    </main>
+</div>
+<script>
+(function () {
+    const selector = document.querySelector("[data-scene-reference-selector]");
+    if (!selector) {
+        return;
+    }
+
+    const countLabel = selector.querySelector("[data-scene-reference-count]");
+    const limitInput = document.getElementById("id_reference_asset_limit");
+    const providerInput = document.getElementById("id_provider");
+    const cards = Array.from(selector.querySelectorAll("[data-scene-reference-card]"));
+    const providerCaps = {
+        google_nano_banana_2: 4,
+        google_gemini_3_pro_image: 5,
+    };
+    let lastProviderValue = providerInput ? providerInput.value : "";
+
+    function checkedCards() {
+        return cards.filter((card) => {
+            const checkbox = card.querySelector("[data-scene-reference-checkbox]");
+            return checkbox && checkbox.checked;
+        });
+    }
+
+    function ensureSubjectPrimary(subjectSlug) {
+        const subjectCards = cards.filter((card) => card.dataset.subjectSlug === subjectSlug);
+        const checkedSubjectCards = subjectCards.filter((card) => {
+            const checkbox = card.querySelector("[data-scene-reference-checkbox]");
+            return checkbox && checkbox.checked;
+        });
+        const checkedPrimary = checkedSubjectCards.find((card) => {
+            const radio = card.querySelector("[data-scene-reference-primary]");
+            return radio && radio.checked;
+        });
+
+        if (!checkedPrimary && checkedSubjectCards.length) {
+            const firstRadio = checkedSubjectCards[0].querySelector("[data-scene-reference-primary]");
+            if (firstRadio) {
+                firstRadio.checked = true;
+            }
+        }
+    }
+
+    function syncReferenceSelection() {
+        const subjects = new Set(cards.map((card) => card.dataset.subjectSlug));
+        subjects.forEach(ensureSubjectPrimary);
+        const selectedCards = checkedCards();
+
+        cards.forEach((card) => {
+            const checkbox = card.querySelector("[data-scene-reference-checkbox]");
+            const radio = card.querySelector("[data-scene-reference-primary]");
+            const orderLabel = card.querySelector("[data-scene-reference-order]");
+            const selected = checkbox && checkbox.checked;
+            const primary = radio && radio.checked && selected;
+            const globalIndex = selectedCards.indexOf(card);
+
+            card.classList.toggle("selected", selected);
+            card.classList.toggle("job-primary", primary);
+            if (radio) {
+                radio.disabled = !selected;
+                if (!selected) {
+                    radio.checked = false;
+                }
+            }
+            if (orderLabel) {
+                orderLabel.textContent = (
+                    selected
+                        ? `Selected #${globalIndex + 1}${primary ? " · character primary" : ""}`
+                        : "Not selected"
+                );
+            }
+        });
+
+        if (countLabel) {
+            const limit = parseInt(limitInput && limitInput.value ? limitInput.value : "", 10);
+            const baseText = `${selectedCards.length} selected`;
+            if (limit && selectedCards.length > limit) {
+                countLabel.textContent = `${baseText} · over limit ${limit}`;
+                countLabel.classList.add("over-limit");
+            } else if (limit) {
+                countLabel.textContent = `${baseText} · limit ${limit}`;
+                countLabel.classList.remove("over-limit");
+            } else {
+                countLabel.textContent = baseText;
+                countLabel.classList.remove("over-limit");
+            }
+        }
+    }
+
+    cards.forEach((card) => {
+        const checkbox = card.querySelector("[data-scene-reference-checkbox]");
+        const radio = card.querySelector("[data-scene-reference-primary]");
+
+        if (checkbox) {
+            checkbox.addEventListener("change", syncReferenceSelection);
+        }
+
+        if (radio) {
+            radio.addEventListener("change", () => {
+                if (radio.checked && checkbox) {
+                    checkbox.checked = true;
+                }
+                syncReferenceSelection();
+            });
+        }
+    });
+
+    if (limitInput) {
+        limitInput.addEventListener("input", syncReferenceSelection);
+    }
+    if (providerInput && limitInput) {
+        providerInput.addEventListener("change", () => {
+            const newProvider = providerInput.value || "";
+            const currentLimit = parseInt(limitInput.value || "", 10);
+            const previousCap = providerCaps[lastProviderValue];
+            const nextCap = providerCaps[newProvider];
+
+            if (nextCap && (!currentLimit || currentLimit === previousCap)) {
+                limitInput.value = String(nextCap);
+            }
+
+            lastProviderValue = newProvider;
+            syncReferenceSelection();
+        });
+    }
+
+    syncReferenceSelection();
+}());
+</script>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

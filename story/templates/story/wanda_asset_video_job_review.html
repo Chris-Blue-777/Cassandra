@@ -1,0 +1,204 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · Create Scene Animation Job</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-asset-video-1">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page wanda-media-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>Create Scene Animation Job</strong>
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}?asset={{ asset.id }}#asset-{{ asset.id }}'">
+                Back to Source Asset
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        {% if review_form %}
+            <section class="relationship-map-toolbar wanda-visual-toolbar">
+                <div>
+                    <h1>Scene animation job</h1>
+                    <p>
+                        Create a provider-specific video job from this scene asset. For Runway, the scene image becomes the first frame; future providers can use their own scene/reference workflow here.
+                    </p>
+                </div>
+                <div class="media-job-summary-pill">
+                    Asset #{{ asset.id }}
+                    {% if asset.source_scene %}· turn {{ asset.source_scene.turn_number }}{% endif %}
+                </div>
+            </section>
+
+            <section class="wanda-media-review-grid">
+                <div class="relationship-map-card">
+                    <h2>Review and save</h2>
+
+                    <div
+                        class="runway-workflow-card good-path"
+                        data-provider-workflow="runway_gen45_video"
+                    >
+                        <h3>Recommended multi-character workflow</h3>
+                        <p>
+                            Runway’s current workflow works best when the image below already contains the scene composition and visible characters, so Runway only has to animate the composed frame.
+                        </p>
+                        <p>
+                            Wanda sends this still image as Runway’s first frame and keeps the inherited character subject bindings in the saved job. Identity remains mandatory; the frame is provider support, not a replacement for identity.
+                        </p>
+                    </div>
+                    <div
+                        class="runway-workflow-card"
+                        data-provider-workflow="generic"
+                    >
+                        <h3>Provider-specific scene workflow</h3>
+                        <p>
+                            This page is the shared entry point for animating a scene/multi-character asset. The selected provider determines how Wanda uses the source image, subject bindings, and any future reference limits.
+                        </p>
+                    </div>
+
+                    {% if asset.file %}
+                        <div class="wanda-media-result-preview inline-asset-preview">
+                            <img src="{{ asset.file.url }}" alt="Scene source asset {{ asset.id }}">
+                        </div>
+                    {% endif %}
+
+                    <form method="post" class="wanda-visual-form">
+                        {% csrf_token %}
+                        {{ review_form.selected_reference_ids }}
+                        {{ review_form.primary_reference_id }}
+                        {{ review_form.original_prompt }}
+                        {{ review_form.original_negative_prompt }}
+                        <input type="hidden" name="video_mode" value="video_image">
+
+                        {{ review_form.non_field_errors }}
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.title.id_for_label }}">Title</label>
+                            {{ review_form.title }}
+                            {{ review_form.title.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.provider.id_for_label }}">Video provider / model</label>
+                            {{ review_form.provider }}
+                            <div class="field-help">{{ review_form.provider.help_text }}</div>
+                            {{ review_form.provider.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.prompt.id_for_label }}">Motion / video prompt</label>
+                            {{ review_form.prompt }}
+                            <div class="field-help">{{ review_form.prompt.help_text }}</div>
+                            {{ review_form.prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.negative_prompt.id_for_label }}">Negative prompt</label>
+                            {{ review_form.negative_prompt }}
+                            <div class="field-help">{{ review_form.negative_prompt.help_text }}</div>
+                            {{ review_form.negative_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ review_form.user_prompt_override.id_for_label }}">Motion override / extra direction</label>
+                            {{ review_form.user_prompt_override }}
+                            <div class="field-help">{{ review_form.user_prompt_override.help_text }}</div>
+                            {{ review_form.user_prompt_override.errors }}
+                        </div>
+
+                        <div class="chat-actions">
+                            <button type="submit">Save Scene Animation Job</button>
+                        </div>
+                    </form>
+                </div>
+
+                <aside class="wanda-visual-side">
+                    <div class="relationship-map-card">
+                        <h2>Scene source</h2>
+                        <dl class="agent-definition-list">
+                            <dt>Asset</dt>
+                            <dd>#{{ asset.id }}</dd>
+                            <dt>Provider</dt>
+                            <dd>{{ asset.provider|default:"—" }}</dd>
+                            <dt>Source job</dt>
+                            <dd>{% if asset.job %}#{{ asset.job.id }} · {{ asset.job.get_generation_mode_display }}{% else %}—{% endif %}</dd>
+                            <dt>Scene</dt>
+                            <dd>{% if asset.source_scene %}Turn {{ asset.source_scene.turn_number }}{% else %}—{% endif %}</dd>
+                        </dl>
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Saved packet preview</h2>
+                        <p class="muted">
+                            The selected provider adapter consumes this packet. For Runway, the source image is sent as promptImage in memory only.
+                        </p>
+                        <details open class="mini-folder">
+                            <summary>Prompt packet JSON</summary>
+                            <pre>{{ prompt_packet|prettyjson }}</pre>
+                        </details>
+                    </div>
+                </aside>
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">No scene source asset is available to animate.</p>
+            </section>
+        {% endif %}
+</main>
+</div>
+<script>
+(function () {
+    const providerInput = document.getElementById("id_provider");
+    const workflowCards = Array.from(document.querySelectorAll("[data-provider-workflow]"));
+    if (!providerInput || !workflowCards.length) {
+        return;
+    }
+
+    function syncProviderWorkflow() {
+        const providerId = providerInput.value || "generic";
+        const hasSpecificWorkflow = workflowCards.some((card) => (
+            (card.dataset.providerWorkflow || "") === providerId
+        ));
+        workflowCards.forEach((card) => {
+            const workflow = card.dataset.providerWorkflow || "generic";
+            card.hidden = hasSpecificWorkflow
+                ? workflow !== providerId
+                : workflow !== "generic";
+        });
+    }
+
+    providerInput.addEventListener("change", syncProviderWorkflow);
+    syncProviderWorkflow();
+}());
+</script>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

@@ -1,24 +1,105 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Cast — Cassandra</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}">
 </head>
 <body>
-    <h1>Cast</h1>
-    <ul>
-    {% for character in characters %}
-        <li>
-            <strong>{{ character.name }}</strong>: {{ character.description }}
-            <a href="{% url 'character_edit_form' character.id %}">
-                Edit
-            </a>
-        </li>
-    {% endfor %}
-</ul>
-    <button onclick="window.location.href='{% url 'create_character' %}'">Add a Character</button>
-    <button onclick="window.location.href='{% url 'scene_page' %}'">Back to Scene</button>
+    <div class="app-shell page-shell cast-management-shell">
+        <header class="topbar cast-management-topbar">
+            <div class="topbar-left">
+                <div>
+                    <div class="topbar-world">
+                        <span class="topbar-label">Cast</span>
+                        <strong>
+                            {% if active_world %}
+                                {{ active_world.name }}
+                            {% else %}
+                                No active world
+                            {% endif %}
+                        </strong>
+                    </div>
+                    <p class="cast-page-intro">
+                        The active characters available to Cassandra and the scene engine.
+                    </p>
+                </div>
+            </div>
+            <nav class="topbar-right cast-management-actions" aria-label="Cast navigation">
+                {% include "story/_theme_toggle.html" %}
+                <a class="button-link secondary" href="{% url 'scene_page' %}">Back to Scene</a>
+                <a class="button-link" href="{% url 'create_character' %}">Add Character</a>
+            </nav>
+        </header>
 
+        <main class="cast-management-page">
+            <section class="panel cast-page-panel">
+                <div class="cast-page-heading">
+                    <div>
+                        <h1>Cast</h1>
+                        <p class="muted">
+                            Each card keeps the original character description and edit access in one readable place.
+                        </p>
+                    </div>
+                    <span class="cast-count-pill">
+                        {{ characters|length }} character{{ characters|length|pluralize }}
+                    </span>
+                </div>
+
+                {% if error %}
+                    <div class="empty-state-box">{{ error }}</div>
+                {% elif characters %}
+                    <div class="cast-grid">
+                        {% for character in characters %}
+                            <article class="cast-card{% if not character.is_active %} is-inactive{% endif %}">
+                                <div class="cast-card-header">
+                                    <div class="cast-card-title-block">
+                                        <p class="cast-card-eyebrow">{{ character.slug|default:"unslugged" }}</p>
+                                        <h2>{{ character.name }}</h2>
+                                    </div>
+                                    <div class="cast-badge-row">
+                                        {% if character.is_player %}
+                                            <span class="cast-badge player">Player</span>
+                                        {% endif %}
+                                        {% if character.is_active %}
+                                            <span class="cast-badge active">Active</span>
+                                        {% else %}
+                                            <span class="cast-badge inactive">Inactive</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <div class="cast-description">
+                                    {% if character.description %}
+                                        {{ character.description|linebreaksbr }}
+                                    {% else %}
+                                        <span class="empty-note">No description yet.</span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="cast-card-footer">
+                                    <div class="cast-meta-line">
+                                        <span class="cast-meta-label">Agent</span>
+                                        <span>{{ character.get_agent_provider_display }}</span>
+                                    </div>
+                                    <a class="button-link secondary" href="{% url 'character_edit_form' character.id %}">
+                                        Edit
+                                    </a>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state-box">
+                        No characters yet. Add the first cast member when you’re ready.
+                    </div>
+                {% endif %}
+            </section>
+        </main>
+    </div>
+{% include "story/_theme_script.html" %}
 </body>
 </html>

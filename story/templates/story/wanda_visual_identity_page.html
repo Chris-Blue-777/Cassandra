@@ -1,0 +1,424 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · Visual Identity</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-visual-identity-1">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>Visual Identity</strong>
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_media_jobs' %}'">
+                Media Jobs
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'cast_page' %}'">
+                Cast
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        <section class="relationship-map-toolbar wanda-visual-toolbar">
+            <div>
+                <h1>Canonical physical identities</h1>
+                <p>
+                    Wanda stores objective media-facing identities here for future image and video generation.
+                    These records do not enter normal Cassandra drafts or character-agent prose context.
+                </p>
+            </div>
+
+            {% if characters %}
+                <form method="get" class="relationship-map-selector">
+                    <label for="character-select">Character</label>
+                    <select id="character-select" name="character">
+                        {% for character in characters %}
+                            <option value="{{ character.slug }}" {% if selected_character and character.id == selected_character.id %}selected{% endif %}>
+                                {{ character.name }}{% if character.visual_identity %} · v{{ character.visual_identity.current_version }}{% else %} · no visual identity{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit">Open</button>
+                </form>
+            {% endif %}
+        </section>
+
+        {% if selected_character %}
+            <section class="wanda-visual-grid">
+                <div class="relationship-map-card wanda-visual-editor">
+                    <div class="relationship-map-section-heading">
+                        <div>
+                            <h2>{{ selected_character.name }}</h2>
+                            <p>
+                                {% if selected_version %}
+                                    Editing version {{ selected_version.version_number }} · {{ selected_version.status }}
+                                {% elif visual_identity %}
+                                    No saved version selected yet.
+                                {% else %}
+                                    No visual identity saved yet.
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+
+                    {% if versions %}
+                        <div class="wanda-version-toolbar">
+                            <form method="get" class="relationship-map-selector wanda-version-selector">
+                                <input type="hidden" name="character" value="{{ selected_character.slug }}">
+                                <label for="version-select">Version</label>
+                                <select
+                                    id="version-select"
+                                    name="version"
+                                    onchange="this.form.submit()"
+                                >
+                                    {% for version in versions %}
+                                        <option value="{{ version.version_number }}" {% if selected_version and version.id == selected_version.id %}selected{% endif %}>
+                                            v{{ version.version_number }} · {{ version.status }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+
+                            <form method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_action" value="create_version">
+                                <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                                {% if selected_version %}
+                                    <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                                {% endif %}
+                                <button type="submit" class="secondary">
+                                    New Version From This One
+                                </button>
+                            </form>
+                        </div>
+                    {% endif %}
+
+                    {% if selected_version %}
+                        <div class="wanda-media-actions">
+                            <div>
+                                <h3>Media generation workbench</h3>
+                                <p class="muted">
+                                    Create saved portrait or video prompt jobs from {{ selected_character.name }} v{{ selected_version.version_number }}.
+                                    Provider calls happen from the Generated Media page.
+                                </p>
+                            </div>
+                            <div class="wanda-media-action-buttons">
+                                <form method="get" action="{% url 'review_portrait_media_job' %}">
+                                    <input type="hidden" name="source" value="wanda_identity">
+                                    <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                                    <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                                    <button type="submit" class="secondary">Create Portrait Job</button>
+                                </form>
+                                <form method="get" action="{% url 'review_video_media_job' %}">
+                                    <input type="hidden" name="source" value="wanda_identity">
+                                    <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                                    <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                                    <button type="submit" class="secondary">Create Video Job</button>
+                                </form>
+                                <form method="get" action="{% url 'review_general_image_media_job' %}">
+                                    <button type="submit" class="secondary">Create General Image</button>
+                                </form>
+                                <form method="post" action="{% url 'quick_create_portrait_media_job' %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="source" value="wanda_identity">
+                                    <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                                    <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                                    <button type="submit">Quick Create Portrait Job</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    {% if visual_template_source %}
+                        <div class="message-box info">
+                            New identity fields are pre-filled from {{ visual_template_source }} as a template.
+                            Edit them before saving {{ selected_character.name }}'s first visual identity.
+                        </div>
+                    {% endif %}
+
+                    <form method="post" class="wanda-visual-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="form_action" value="save_identity">
+                        <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                        {% if selected_version %}
+                            <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                        {% endif %}
+
+                        {{ identity_form.non_field_errors }}
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.status.id_for_label }}">Status</label>
+                            {{ identity_form.status }}
+                            {{ identity_form.status.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.appearance_summary.id_for_label }}">Appearance summary</label>
+                            {{ identity_form.appearance_summary }}
+                            {{ identity_form.appearance_summary.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.canonical_identity_prompt.id_for_label }}">Canonical identity prompt</label>
+                            {{ identity_form.canonical_identity_prompt }}
+                            <div class="field-help">{{ identity_form.canonical_identity_prompt.help_text }}</div>
+                            {{ identity_form.canonical_identity_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.negative_identity_prompt.id_for_label }}">Negative identity prompt</label>
+                            {{ identity_form.negative_identity_prompt }}
+                            <div class="field-help">{{ identity_form.negative_identity_prompt.help_text }}</div>
+                            {{ identity_form.negative_identity_prompt.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.traits.id_for_label }}">Locked traits JSON</label>
+                            {{ identity_form.traits }}
+                            <div class="field-help">{{ identity_form.traits.help_text }}</div>
+                            {{ identity_form.traits.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.allowed_variations.id_for_label }}">Allowed variations JSON</label>
+                            {{ identity_form.allowed_variations }}
+                            <div class="field-help">{{ identity_form.allowed_variations.help_text }}</div>
+                            {{ identity_form.allowed_variations.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.provider_notes.id_for_label }}">Provider notes JSON</label>
+                            {{ identity_form.provider_notes }}
+                            <div class="field-help">{{ identity_form.provider_notes.help_text }}</div>
+                            {{ identity_form.provider_notes.errors }}
+                        </div>
+
+                        <div class="wanda-field-row">
+                            <label for="{{ identity_form.change_reason.id_for_label }}">Version note</label>
+                            {{ identity_form.change_reason }}
+                            <div class="field-help">{{ identity_form.change_reason.help_text }}</div>
+                            {{ identity_form.change_reason.errors }}
+                        </div>
+
+                        <div class="chat-actions">
+                            <button type="submit">
+                                {% if selected_version %}
+                                    Save Version {{ selected_version.version_number }}
+                                {% else %}
+                                    Save New Visual Identity
+                                {% endif %}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <aside class="wanda-visual-side">
+                    <div class="relationship-map-card">
+                        <h2>
+                            Reference assets
+                            {% if selected_version %}
+                                <span class="muted">· v{{ selected_version.version_number }}</span>
+                            {% endif %}
+                        </h2>
+
+                        <form method="post" enctype="multipart/form-data" class="wanda-reference-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_action" value="upload_reference">
+                            <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                            {% if selected_version %}
+                                <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                            {% endif %}
+
+                            {{ reference_form.non_field_errors }}
+
+                            <div class="wanda-field-row">
+                                <label for="{{ reference_form.file.id_for_label }}">File</label>
+                                {{ reference_form.file }}
+                                {{ reference_form.file.errors }}
+                            </div>
+
+                            <div class="wanda-field-row">
+                                <label for="{{ reference_form.kind.id_for_label }}">Kind</label>
+                                {{ reference_form.kind }}
+                                {{ reference_form.kind.errors }}
+                            </div>
+
+                            <div class="wanda-field-row wanda-checkbox-row">
+                                {{ reference_form.is_primary }}
+                                <label for="{{ reference_form.is_primary.id_for_label }}">Primary reference</label>
+                                {{ reference_form.is_primary.errors }}
+                            </div>
+
+                            <div class="wanda-field-row">
+                                <label for="{{ reference_form.caption.id_for_label }}">Caption</label>
+                                {{ reference_form.caption }}
+                                {{ reference_form.caption.errors }}
+                            </div>
+
+                            <details class="mini-folder">
+                                <summary>Reference source details</summary>
+
+                                <div class="wanda-field-row">
+                                    <label for="{{ reference_form.generation_prompt.id_for_label }}">Reference source prompt</label>
+                                    {{ reference_form.generation_prompt }}
+                                    {{ reference_form.generation_prompt.errors }}
+                                </div>
+
+                                <div class="wanda-field-row">
+                                    <label for="{{ reference_form.provider.id_for_label }}">Provider</label>
+                                    {{ reference_form.provider }}
+                                    {{ reference_form.provider.errors }}
+                                </div>
+
+                                <div class="wanda-field-row">
+                                    <label for="{{ reference_form.provider_asset_id.id_for_label }}">Provider asset ID</label>
+                                    {{ reference_form.provider_asset_id }}
+                                    {{ reference_form.provider_asset_id.errors }}
+                                </div>
+
+                                <div class="wanda-field-row">
+                                    <label for="{{ reference_form.metadata.id_for_label }}">Metadata JSON</label>
+                                    {{ reference_form.metadata }}
+                                    <div class="field-help">{{ reference_form.metadata.help_text }}</div>
+                                    {{ reference_form.metadata.errors }}
+                                </div>
+                            </details>
+
+                            <button type="submit" class="secondary">Upload Reference</button>
+                        </form>
+
+                        {% if references %}
+                            <div class="wanda-reference-list">
+                                {% for reference in references %}
+                                    <div class="wanda-reference-card">
+                                        {% if reference.file %}
+                                            <a href="{{ reference.file.url }}" target="_blank" rel="noopener">
+                                                <img src="{{ reference.file.url }}" alt="{{ selected_character.name }} visual reference">
+                                            </a>
+                                        {% endif %}
+                                        <div>
+                                            <strong>{{ reference.get_kind_display }}</strong>
+                                            {% if reference.is_primary %}
+                                                <span class="presence-inline present">Primary</span>
+                                            {% endif %}
+                                            {% if reference.identity_version %}
+                                                <span class="muted">v{{ reference.identity_version.version_number }}</span>
+                                            {% endif %}
+                                            {% if reference.caption %}
+                                                <p>{{ reference.caption|linebreaksbr }}</p>
+                                            {% endif %}
+                                            <form
+                                                method="post"
+                                                class="inline-delete-form wanda-reference-delete-form"
+                                                onsubmit="return confirm('Delete this uploaded visual reference?');"
+                                            >
+                                                {% csrf_token %}
+                                                <input type="hidden" name="form_action" value="delete_reference">
+                                                <input type="hidden" name="character_slug" value="{{ selected_character.slug }}">
+                                                <input type="hidden" name="reference_id" value="{{ reference.id }}">
+                                                {% if selected_version %}
+                                                    <input type="hidden" name="version_number" value="{{ selected_version.version_number }}">
+                                                {% endif %}
+                                                <button type="submit" class="danger subtle-danger">
+                                                    Delete Reference
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="empty-state">
+                                No reference assets for this version yet.
+                            </p>
+                        {% endif %}
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Wanda prompt packet preview</h2>
+                        <p class="muted">
+                            Future image/video generators can use this packet. No provider call is made here.
+                        </p>
+                        <details open class="mini-folder">
+                            <summary>Selected character packet</summary>
+                            <pre>{{ visual_packet|prettyjson }}</pre>
+                        </details>
+                        <details class="mini-folder">
+                            <summary>Scene media prompt packet</summary>
+                            <pre>{{ visual_prompt_packet|prettyjson }}</pre>
+                        </details>
+                    </div>
+
+                    <div class="relationship-map-card">
+                        <h2>Version history</h2>
+                        {% if versions %}
+                            <div class="wanda-version-list">
+                                {% for version in versions %}
+                                    <details class="mini-folder">
+                                        <summary>
+                                            v{{ version.version_number }}
+                                            <span class="muted">· {{ version.source }} · {{ version.created_at }}</span>
+                                            {% if selected_version and version.id == selected_version.id %}
+                                                <span class="presence-inline present">Editing</span>
+                                            {% endif %}
+                                        </summary>
+                                        {% if version.change_reason %}
+                                            <p>{{ version.change_reason|linebreaksbr }}</p>
+                                        {% endif %}
+                                        <dl class="agent-definition-list">
+                                            <dt>Status</dt>
+                                            <dd>{{ version.status }}</dd>
+                                            <dt>Appearance</dt>
+                                            <dd>{{ version.appearance_summary|default:"—"|linebreaksbr }}</dd>
+                                        </dl>
+                                        <details class="mini-folder">
+                                            <summary>Snapshot JSON</summary>
+                                            <pre>{{ version.traits_json|prettyjson }}</pre>
+                                        </details>
+                                    </details>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="empty-state">No saved versions yet.</p>
+                        {% endif %}
+                    </div>
+                </aside>
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">No active characters are available for visual identity work.</p>
+            </section>
+        {% endif %}
+    </main>
+</div>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

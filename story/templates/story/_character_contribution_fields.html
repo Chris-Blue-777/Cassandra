@@ -1,0 +1,106 @@
+{% if c.character_pov_prose %}
+    <div class="scene-feed-contribution-prose">
+        {{ c.character_pov_prose|linebreaksbr }}
+    </div>
+{% endif %}
+
+{% if c.attempted_action %}
+    <strong>Action:</strong> {{ c.attempted_action }}<br>
+{% endif %}
+
+{% if c.attempted_dialogue %}
+    <strong>Dialogue:</strong> “{{ c.attempted_dialogue }}”<br>
+{% endif %}
+
+{% if c.internal_intent %}
+    <strong>Intent:</strong> {{ c.internal_intent }}<br>
+{% endif %}
+
+{% if c.emotional_strategy %}
+    <strong>Emotional Strategy:</strong> {{ c.emotional_strategy }}<br>
+{% endif %}
+
+{% if c.unspoken_avoidance %}
+    <strong>Unspoken Avoidance:</strong> {{ c.unspoken_avoidance }}<br>
+{% endif %}
+
+{% if c.desired_next_moment %}
+    <strong>Desired Next Moment:</strong> {{ c.desired_next_moment }}<br>
+{% endif %}
+
+{% if c.uninterrupted_followthrough %}
+    <strong>Uninterrupted Followthrough:</strong> {{ c.uninterrupted_followthrough }}<br>
+{% endif %}
+
+{% if c.resistance_response %}
+    <strong>Resistance Response:</strong> {{ c.resistance_response }}<br>
+{% endif %}
+
+{% if c.pressure_channel %}
+    <strong>Pressure Channel:</strong> {{ c.pressure_channel }}<br>
+{% endif %}
+
+{% if c.emotional_posture %}
+    <strong>Posture:</strong> {{ c.emotional_posture }}<br>
+{% endif %}
+
+{% if c.confidence %}
+    <strong>Confidence:</strong> {{ c.confidence }}<br>
+{% endif %}
+
+{% if c.target_slugs %}
+    <strong>Targets:</strong>
+    {{ c.target_slugs|join:", " }}<br>
+{% endif %}
+
+{% if c.interrupt_priority %}
+    <strong>Interrupt:</strong> {{ c.interrupt_priority }}<br>
+{% endif %}
+
+{% if c.required_visibility %}
+    <strong>Visibility:</strong> {{ c.required_visibility }}<br>
+{% endif %}
+
+{% if c.required_audibility %}
+    <strong>Audibility:</strong> {{ c.required_audibility }}<br>
+{% endif %}
+
+{% if c.body_motion %}
+    <strong>Body Motion:</strong> {{ c.body_motion }}<br>
+{% endif %}
+
+{% if c.observed_focus %}
+    <strong>Observed Focus:</strong>
+    <ul class="compact-debug-list">
+        {% for item in c.observed_focus %}
+            <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+{% if c.beliefs_in_play %}
+    <strong>Beliefs in Play:</strong>
+    <ul class="compact-debug-list">
+        {% for item in c.beliefs_in_play %}
+            <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+{% if c.memory_pressures %}
+    <strong>Memory Pressures:</strong>
+    <ul class="compact-debug-list">
+        {% for item in c.memory_pressures %}
+            <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+{% if c.proposed_effects %}
+    <strong>Proposed Effects:</strong>
+    <ul class="compact-debug-list">
+        {% for item in c.proposed_effects %}
+            <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}

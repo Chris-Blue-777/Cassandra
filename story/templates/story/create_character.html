@@ -1,32 +1,84 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Character</title>
+    <title>
+        {% if is_editing %}
+            Edit {{ character.name }} — Cassandra
+        {% else %}
+            Create Character — Cassandra
+        {% endif %}
+    </title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}">
 </head>
 <body>
-    <h1>{% if is_editing %}
-        Edit Character
-    {% else %}
-        Create Character
-    {% endif %}</h1>
+    <div class="app-shell page-shell cast-management-shell">
+        <header class="topbar cast-management-topbar">
+            <div class="topbar-left">
+                <div>
+                    <div class="topbar-world">
+                        <span class="topbar-label">Cast</span>
+                        <strong>
+                            {% if is_editing %}
+                                Edit {{ character.name }}
+                            {% else %}
+                                Create Character
+                            {% endif %}
+                        </strong>
+                    </div>
+                    <p class="cast-page-intro">
+                        Authorial setup for the character’s identity, profile, and agent behavior.
+                    </p>
+                </div>
+            </div>
+            <nav class="topbar-right cast-management-actions" aria-label="Character form navigation">
+                {% include "story/_theme_toggle.html" %}
+                <a class="button-link secondary" href="{% url 'cast_page' %}">Back to Cast</a>
+            </nav>
+        </header>
 
-    <button onclick="window.location.href='{% url 'cast_page' %}'">Back to Cast</button>
+        <main class="cast-management-page">
+            <section class="panel cast-form-panel">
+                <div class="cast-page-heading">
+                    <div>
+                        <h1>
+                            {% if is_editing %}
+                                Edit Character
+                            {% else %}
+                                Create Character
+                            {% endif %}
+                        </h1>
+                        <p class="muted">
+                            Keep the core identity concise; longer personal material belongs in the profile fields.
+                        </p>
+                    </div>
+                </div>
 
-    {% if error %}
-        <p style="color:red;">{{ error }}</p>
-    {% endif %}
+                {% if error %}
+                    <div class="message-box error">{{ error }}</div>
+                {% endif %}
 
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
+                <form class="cast-form-card" method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
 
-        <button type="submit">{% if is_editing %}
-            Save Changes
-        {% else %}
-            Create Character
-        {% endif %}</button>
-    </form>
+                    <div class="cast-form-actions">
+                        <button type="submit">
+                            {% if is_editing %}
+                                Save Changes
+                            {% else %}
+                                Create Character
+                            {% endif %}
+                        </button>
+                        <a class="button-link secondary" href="{% url 'cast_page' %}">Cancel</a>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+{% include "story/_theme_script.html" %}
 </body>
 </html>

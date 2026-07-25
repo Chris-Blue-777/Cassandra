@@ -1,0 +1,607 @@
+{% load static %}
+{% load debug_extras %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanda · Media</title>
+    {% include "story/_theme_head.html" %}
+    <link rel="stylesheet" href="{% static 'story/styles.css' %}?v=wanda-media-assets-2">
+</head>
+<body>
+<div class="app-shell relationship-map-page wanda-visual-page wanda-media-page">
+    {% if error %}
+        <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-box {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-world">
+                <span class="topbar-label">Wanda</span>
+                <strong>Media</strong>
+                {% if active_world %}
+                    <span class="muted">· {{ active_world.name }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="topbar-right">
+            {% include "story/_theme_toggle.html" %}
+            <button type="button" class="secondary" onclick="window.location.reload()">
+                Refresh Jobs
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'wanda_visual_identities' %}'">
+                Wanda Visuals
+            </button>
+            <button type="button" class="secondary" onclick="window.location.href='{% url 'scene_page' %}'">
+                Back to Scene
+            </button>
+        </div>
+    </div>
+
+    <main class="relationship-map-shell wanda-visual-shell">
+        <section class="relationship-map-toolbar wanda-visual-toolbar">
+            <div>
+                <h1>Generated media</h1>
+                <p>
+                    Pending jobs are shown first so live generations and retries stay within easy reach. Finished assets remain below with their job provenance.
+                </p>
+            </div>
+            <div class="provider-button-row">
+                <button type="button" onclick="window.location.href='{% url 'review_general_image_media_job' %}'">
+                    Create General Image
+                </button>
+                <div class="media-job-summary-pill">
+                    {{ assets|length }} asset{% if assets|length != 1 %}s{% endif %}
+                    · {{ jobs|length }} pending job{% if jobs|length != 1 %}s{% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="relationship-map-toolbar wanda-visual-toolbar wanda-media-queue-toolbar">
+            <div>
+                <h1>Pending jobs</h1>
+                <p>
+                    These are saved packets waiting for generation, retry, or manual attachment. Completed jobs move into the asset gallery below.
+                </p>
+            </div>
+        </section>
+
+        {% if jobs %}
+            <section class="wanda-media-job-list wanda-media-pending-list">
+                {% for job in jobs %}
+                    <article
+                        id="job-{{ job.id }}"
+                        class="relationship-map-card wanda-media-job-card wanda-media-pending-card {% if focused_job_id == job.id %}focused-media-job{% endif %}"
+                    >
+                        <div class="wanda-media-record-divider wanda-media-record-divider-job">
+                            <span>Pending job #{{ job.id }}</span>
+                            <span>{{ job.get_status_display }}</span>
+                        </div>
+
+                        <div class="media-job-card-header">
+                            <div>
+                                <h2>#{{ job.id }} · {{ job.title|default:"Untitled media job" }}</h2>
+                                <p class="muted">
+                                    {{ job.get_media_type_display }} · {{ job.get_generation_mode_display }} · {{ job.get_source_display }}
+                                    {% if job.target_character %}
+                                        · {{ job.target_character.name }}
+                                    {% elif job.subject_names %}
+                                        · {{ job.subject_names|join:", " }}
+                                    {% endif %}
+                                    {% if job.visual_identity_version %}
+                                        · v{{ job.visual_identity_version.version_number }}
+                                    {% endif %}
+                                    {% if job.media_type == "photo" %}
+                                        · {{ job.prompt_packet_json.visual_style.label|default:"style not recorded" }}
+                                    {% elif job.prompt_packet_json.runway_options %}
+                                        · {{ job.prompt_packet_json.runway_options.model|default:"video model" }}
+                                        · {{ job.prompt_packet_json.runway_options.duration|default:"5" }}s
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <span class="media-job-status media-job-status-{{ job.status }}">
+                                {{ job.get_status_display }}
+                            </span>
+                        </div>
+
+                        {% if job.status == "ready_for_provider" %}
+                            <div class="wanda-provider-action-bar">
+                                <div>
+                                    <strong>Ready for live generation.</strong>
+                                    <p class="muted">
+                                        Click once to send this job’s prompt and selected references to the chosen provider.
+                                    </p>
+                                    {% if job.media_type == "video" %}
+                                        <p class="muted">
+                                            Runway video jobs remain identity-constrained. Selected images are frame anchors; Wanda still sends the saved subject identity packet through the prompt and job metadata.
+                                        </p>
+                                    {% endif %}
+                                </div>
+                                <div class="provider-button-row">
+                                    {% for provider in job.provider_actions %}
+                                        <form method="post" action="{% url 'confirm_media_provider_generation' job.id %}" class="inline-provider-form">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                                            <button type="submit" {% if not forloop.first %}class="secondary"{% endif %}>
+                                                Generate with {{ provider.short_label|default:provider.label }}
+                                            </button>
+                                        </form>
+                                    {% empty %}
+                                        <p class="muted">No compatible live provider is registered for this job.</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% elif job.status == "queued" %}
+                            <div class="wanda-provider-action-bar">
+                                <div>
+                                    {% if job.can_check_provider_status %}
+                                        <strong>The provider is processing this video.</strong>
+                                        <p class="muted">
+                                            Runway has accepted the task. Check the task status; if it has finished, Wanda will download and save the output video locally.
+                                        </p>
+                                        {% if job.provider_task_id %}
+                                            <p class="muted">Provider task: {{ job.provider_task_id }}</p>
+                                        {% endif %}
+                                    {% elif job.is_local_background_generation %}
+                                        <strong>Wanda is submitting this job in the background.</strong>
+                                        <p class="muted">
+                                            Current phase: {{ job.local_runner_phase|default:"queued" }}. You can go back to the scene and keep writing; refresh this page when you want to check in.
+                                        </p>
+                                    {% else %}
+                                        <strong>This job is queued.</strong>
+                                        <p class="muted">
+                                            Wanda is waiting on provider work or local runner state. Refresh this page to check for changes.
+                                        </p>
+                                    {% endif %}
+                                </div>
+                                <div class="provider-button-row">
+                                    {% if job.can_check_provider_status %}
+                                        <form method="post" action="{% url 'check_media_provider_generation_status' job.id %}" class="inline-provider-form">
+                                            {% csrf_token %}
+                                            <button type="submit">Check Runway Status</button>
+                                        </form>
+                                    {% endif %}
+                                    {% if job.can_restart_background_generation %}
+                                        <form method="post" action="{% url 'confirm_media_provider_generation' job.id %}" class="inline-provider-form">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="provider_id" value="{{ job.provider }}">
+                                            <input type="hidden" name="restart_background" value="1">
+                                            <button type="submit" class="secondary">Restart background generation</button>
+                                        </form>
+                                    {% endif %}
+                                    <button type="button" class="secondary" onclick="window.location.reload()">
+                                        Refresh jobs
+                                    </button>
+                                </div>
+                            </div>
+                        {% elif job.status == "failed" %}
+                            <div class="provider-blocker-card">
+                                <strong>Last generation error</strong>
+                                {% if job.error_message %}
+                                    <p>{{ job.error_message }}</p>
+                                {% else %}
+                                    <p>No readable error was saved.</p>
+                                {% endif %}
+                                {% if job.provider_response_json.text_snippets %}
+                                    <p class="muted">
+                                        Provider detail: {{ job.provider_response_json.text_snippets.0 }}
+                                    </p>
+                                {% elif job.provider_response_json.error.message %}
+                                    <p class="muted">
+                                        Provider detail: {{ job.provider_response_json.error.message }}
+                                    </p>
+                                {% elif job.provider_response_json.failure.message %}
+                                    <p class="muted">
+                                        Provider detail: {{ job.provider_response_json.failure.message }}
+                                    </p>
+                                {% endif %}
+                                <div class="provider-button-row">
+                                    {% for provider in job.provider_actions %}
+                                        <form method="post" action="{% url 'confirm_media_provider_generation' job.id %}" class="inline-provider-form">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                                            <button type="submit" class="secondary">
+                                                Retry with {{ provider.short_label|default:provider.label }}
+                                            </button>
+                                        </form>
+                                    {% empty %}
+                                        <p class="muted">No compatible live provider is registered for retry.</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% endif %}
+
+                        {% if job.status != "queued" and job.status != "completed" %}
+                            <div class="wanda-provider-action-bar">
+                                <div>
+                                    <strong>Job management</strong>
+                                    <p class="muted">
+                                        Edit the saved packet before retrying, or delete it and start fresh.
+                                    </p>
+                                </div>
+                                <div class="provider-button-row">
+                                    {% if job.generation_mode == "scene_image" %}
+                                        <a
+                                            class="secondary button-link"
+                                            href="{% url 'edit_scene_image_media_job' job.id %}"
+                                        >
+                                            Edit Job
+                                        </a>
+                                    {% elif job.generation_mode == "general_image" %}
+                                        <a
+                                            class="secondary button-link"
+                                            href="{% url 'edit_general_image_media_job' job.id %}"
+                                        >
+                                            Edit Job
+                                        </a>
+                                    {% endif %}
+                                    <form method="post" action="{% url 'copy_media_job' job.id %}" class="inline-provider-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="secondary">
+                                            Copy as New Job
+                                        </button>
+                                    </form>
+                                    <form method="post" action="{% url 'delete_media_job' job.id %}" class="inline-provider-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="secondary">
+                                            Delete Job
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        {% endif %}
+
+                        <details class="mini-folder" {% if focused_job_id == job.id %}open{% endif %}>
+                            <summary>Job details and prompt</summary>
+                            <dl class="agent-definition-list">
+                                <dt>Provider</dt>
+                                <dd>{{ job.provider|default:"Adapter placeholder only" }}</dd>
+                                <dt>Created</dt>
+                                <dd>{{ job.created_at }}</dd>
+                                <dt>Updated</dt>
+                                <dd>{{ job.updated_at }}</dd>
+                                <dt>Scene ownership</dt>
+                                <dd>
+                                    {% if job.source_scene %}
+                                        Attached to approved scene turn {{ job.source_scene.turn_number }}
+                                    {% elif job.source == "general" %}
+                                        No scene; standalone general Wanda image
+                                    {% else %}
+                                        No scene; created from Wanda Visuals
+                                    {% endif %}
+                                </dd>
+                            </dl>
+
+                            <details class="mini-folder">
+                                <summary>Prompt</summary>
+                                <div class="text-box">{{ job.prompt|linebreaksbr }}</div>
+                            </details>
+
+                            {% if job.negative_prompt %}
+                                <details class="mini-folder">
+                                    <summary>Negative prompt</summary>
+                                    <div class="text-box">{{ job.negative_prompt|linebreaksbr }}</div>
+                                </details>
+                            {% endif %}
+
+                            {% if job.reference_uploads.all %}
+                                <details class="mini-folder" open>
+                                    <summary>Job reference uploads</summary>
+                                    <div class="media-reference-grid">
+                                        {% for reference in job.reference_uploads.all %}
+                                            <article class="media-reference-card selected">
+                                                {% if reference.file %}
+                                                    <img src="{{ reference.file.url }}" alt="Job reference {{ reference.id }}">
+                                                {% else %}
+                                                    <div class="media-reference-missing-image">No preview</div>
+                                                {% endif %}
+                                                <div class="media-reference-card-body">
+                                                    <div class="media-reference-title">
+                                                        Job ref #{{ reference.id }}
+                                                    </div>
+                                                    {% if reference.caption %}
+                                                        <p>{{ reference.caption|truncatechars:120 }}</p>
+                                                    {% endif %}
+                                                    <div class="media-reference-order">
+                                                        Selected{% if reference.ordering %} #{{ reference.ordering }}{% endif %}
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                            {% endif %}
+
+                            <details class="mini-folder">
+                                <summary>Prompt packet JSON</summary>
+                                <pre>{{ job.prompt_packet_json|prettyjson }}</pre>
+                            </details>
+
+                            {% if job.provider_response_json %}
+                                <details class="mini-folder">
+                                    <summary>Provider response summary</summary>
+                                    <pre>{{ job.provider_response_json|prettyjson }}</pre>
+                                </details>
+                            {% endif %}
+                        </details>
+
+                        <details class="mini-folder">
+                            <summary>Attach manual / future provider result</summary>
+                            <form method="post" enctype="multipart/form-data" action="{% url 'upload_generated_media_asset' job.id %}" class="wanda-reference-form">
+                                {% csrf_token %}
+                                <div class="wanda-field-row">
+                                    <label>File</label>
+                                    {{ asset_form.file }}
+                                    {{ asset_form.file.errors }}
+                                </div>
+                                <div class="wanda-field-row">
+                                    <label>Caption</label>
+                                    {{ asset_form.caption }}
+                                    {{ asset_form.caption.errors }}
+                                </div>
+                                <div class="wanda-field-row">
+                                    <label>Provider</label>
+                                    {{ asset_form.provider }}
+                                    {{ asset_form.provider.errors }}
+                                </div>
+                                <div class="wanda-field-row">
+                                    <label>Provider asset ID</label>
+                                    {{ asset_form.provider_asset_id }}
+                                    {{ asset_form.provider_asset_id.errors }}
+                                </div>
+                                <div class="wanda-field-row">
+                                    <label>Metadata JSON</label>
+                                    {{ asset_form.metadata }}
+                                    <div class="field-help">{{ asset_form.metadata.help_text }}</div>
+                                    {{ asset_form.metadata.errors }}
+                                </div>
+                                <button type="submit" class="secondary">Attach Asset</button>
+                            </form>
+                        </details>
+                    </article>
+                {% endfor %}
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">
+                    No pending media jobs. Completed generations are represented by their assets below.
+                </p>
+            </section>
+        {% endif %}
+
+        {% if assets %}
+            <section class="wanda-media-asset-gallery">
+                {% for asset in assets %}
+                    <article
+                        id="asset-{{ asset.id }}"
+                        class="relationship-map-card wanda-media-result-card {% if focused_asset_id == asset.id or focused_job_id == asset.job.id %}focused-media-asset{% endif %}"
+                    >
+                        <div class="wanda-media-record-divider wanda-media-record-divider-asset">
+                            <span>Generated asset #{{ asset.id }}</span>
+                            {% if asset.job %}
+                                <span>Source job #{{ asset.job.id }}</span>
+                            {% endif %}
+                        </div>
+
+                        <div class="wanda-media-result-preview">
+                            {% if asset.file %}
+                                {% if asset.media_type == "video" %}
+                                    <video controls preload="metadata" src="{{ asset.file.url }}">
+                                        Your browser cannot play this video.
+                                    </video>
+                                {% else %}
+                                    <a href="{{ asset.file.url }}" target="_blank" rel="noopener" title="Open full-size asset">
+                                        <img src="{{ asset.file.url }}" alt="Generated media asset {{ asset.id }}">
+                                    </a>
+                                {% endif %}
+                            {% else %}
+                                <div class="media-reference-missing-image">No preview</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="wanda-media-result-body">
+                            <div class="media-job-card-header">
+                                <div>
+                                    <h2>
+                                        Asset #{{ asset.id }}
+                                        {% if asset.target_character %}
+                                            · {{ asset.target_character.name }}
+                                        {% elif asset.job and asset.job.subjects.all %}
+                                            ·
+                                            {% for subject in asset.job.subjects.all %}
+                                                {{ subject.character.name }}{% if not forloop.last %}, {% endif %}
+                                            {% endfor %}
+                                        {% endif %}
+                                    </h2>
+                                    <p class="muted">
+                                        {{ asset.get_media_type_display }}
+                                        {% if asset.provider %} · {{ asset.provider }}{% endif %}
+                                        {% if asset.visual_identity_version %}
+                                            · v{{ asset.visual_identity_version.version_number }}
+                                        {% endif %}
+                                        {% if asset.source_scene %}
+                                            · turn {{ asset.source_scene.turn_number }}
+                                        {% else %}
+                                            · Wanda Visuals
+                                        {% endif %}
+                                    </p>
+                                </div>
+                                <a class="scene-media-job-pill" href="?asset={{ asset.id }}#asset-{{ asset.id }}">
+                                    View details
+                                </a>
+                            </div>
+
+                            {% if asset.caption %}
+                                <p>{{ asset.caption|linebreaksbr }}</p>
+                            {% endif %}
+
+                            <div class="provider-button-row media-result-actions">
+                                {% if asset.file %}
+                                    <a class="secondary button-link" href="{{ asset.file.url }}" target="_blank" rel="noopener">
+                                        Open full view
+                                    </a>
+                                {% endif %}
+                                {% if asset.file and asset.media_type == "photo" %}
+                                    <a
+                                        class="secondary button-link"
+                                        href="{% url 'review_asset_video_media_job' asset.id %}"
+                                    >
+                                        Create scene animation
+                                    </a>
+                                {% endif %}
+                                {% if asset.job %}
+                                    <a class="secondary button-link" href="?job={{ asset.job.id }}#job-{{ asset.job.id }}">
+                                        Source job #{{ asset.job.id }}
+                                    </a>
+                                    <form method="post" action="{% url 'copy_media_job' asset.job.id %}" class="inline-provider-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="secondary">
+                                            Copy source job
+                                        </button>
+                                    </form>
+                                {% endif %}
+                                {% if asset.saved_visual_reference %}
+                                    <a
+                                        class="secondary button-link"
+                                        href="{% url 'wanda_visual_identities' %}?character={{ asset.target_character.slug }}{% if asset.saved_visual_reference.identity_version %}&version={{ asset.saved_visual_reference.identity_version.version_number }}{% endif %}"
+                                    >
+                                        Reference #{{ asset.saved_visual_reference.id }}
+                                    </a>
+                                {% elif asset.target_character and asset.file and asset.media_type == "photo" %}
+                                    <form
+                                        method="post"
+                                        action="{% url 'save_generated_media_asset_as_reference' asset.id %}"
+                                        class="inline-provider-form"
+                                    >
+                                        {% csrf_token %}
+                                        <button type="submit" class="secondary">
+                                            Save as character reference
+                                        </button>
+                                    </form>
+                                {% endif %}
+                                <form
+                                    method="post"
+                                    action="{% url 'delete_generated_media_asset' asset.id %}"
+                                    class="inline-provider-form"
+                                    onsubmit="return confirm('Delete generated asset #{{ asset.id }}? This removes the saved media file but leaves the source job unchanged.');"
+                                >
+                                    {% csrf_token %}
+                                    <button type="submit" class="secondary">
+                                        Delete Asset
+                                    </button>
+                                </form>
+                            </div>
+
+                            <details class="mini-folder" {% if focused_asset_id == asset.id or focused_job_id == asset.job.id %}open{% endif %}>
+                                <summary>Asset information</summary>
+                                <dl class="agent-definition-list">
+                                    <dt>Created</dt>
+                                    <dd>{{ asset.created_at }}</dd>
+                                    <dt>Provider asset ID</dt>
+                                    <dd>{{ asset.provider_asset_id|default:"—" }}</dd>
+                                    <dt>Visual style</dt>
+                                    <dd>
+                                        {% if asset.job %}
+                                            {{ asset.job.prompt_packet_json.visual_style.label|default:"Not recorded" }}
+                                        {% else %}
+                                            Not recorded
+                                        {% endif %}
+                                    </dd>
+                                    <dt>Character reference</dt>
+                                    <dd>
+                                        {% if asset.saved_visual_reference %}
+                                            Saved as reference #{{ asset.saved_visual_reference.id }}
+                                        {% elif asset.target_character %}
+                                            Not saved as a reference yet
+                                        {% else %}
+                                            No target character
+                                        {% endif %}
+                                    </dd>
+                                    <dt>Scene ownership</dt>
+                                    <dd>
+                                        {% if asset.source_scene %}
+                                            Approved scene turn {{ asset.source_scene.turn_number }}
+                                        {% else %}
+                                            No scene; created from Wanda Visuals
+                                        {% endif %}
+                                    </dd>
+                                </dl>
+
+                                {% if asset.metadata_json %}
+                                    <details class="mini-folder">
+                                        <summary>Asset metadata</summary>
+                                        <pre>{{ asset.metadata_json|prettyjson }}</pre>
+                                    </details>
+                                {% endif %}
+                            </details>
+
+                            {% if asset.job %}
+                                <details class="mini-folder" {% if focused_job_id == asset.job.id %}open{% endif %}>
+                                    <summary>Source job provenance</summary>
+                                    <dl class="agent-definition-list">
+                                        <dt>Job</dt>
+                                        <dd>#{{ asset.job.id }} · {{ asset.job.title|default:"Untitled media job" }}</dd>
+                                        <dt>Status</dt>
+                                        <dd>{{ asset.job.get_status_display }}</dd>
+                                        <dt>Provider</dt>
+                                        <dd>{{ asset.job.provider|default:"Adapter placeholder only" }}</dd>
+                                        <dt>Created</dt>
+                                        <dd>{{ asset.job.created_at }}</dd>
+                                    </dl>
+
+                                    <details class="mini-folder">
+                                        <summary>Prompt</summary>
+                                        <div class="text-box">{{ asset.job.prompt|linebreaksbr }}</div>
+                                    </details>
+
+                                    {% if asset.job.negative_prompt %}
+                                        <details class="mini-folder">
+                                            <summary>Negative prompt</summary>
+                                            <div class="text-box">{{ asset.job.negative_prompt|linebreaksbr }}</div>
+                                        </details>
+                                    {% endif %}
+
+                                    <details class="mini-folder">
+                                        <summary>Prompt packet JSON</summary>
+                                        <pre>{{ asset.job.prompt_packet_json|prettyjson }}</pre>
+                                    </details>
+
+                                    {% if asset.job.provider_request_json %}
+                                        <details class="mini-folder">
+                                            <summary>Provider request summary</summary>
+                                            <pre>{{ asset.job.provider_request_json|prettyjson }}</pre>
+                                        </details>
+                                    {% endif %}
+
+                                    {% if asset.job.provider_response_json %}
+                                        <details class="mini-folder">
+                                            <summary>Provider response summary</summary>
+                                            <pre>{{ asset.job.provider_response_json|prettyjson }}</pre>
+                                        </details>
+                                    {% endif %}
+                                </details>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </section>
+        {% else %}
+            <section class="relationship-map-card">
+                <p class="empty-state">
+                    No generated assets yet. Create a portrait job from Wanda Visuals, then generate it here.
+                </p>
+            </section>
+        {% endif %}
+    </main>
+</div>
+{% include "story/_theme_script.html" %}
+</body>
+</html>

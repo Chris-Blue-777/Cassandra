@@ -1,0 +1,111 @@
+{% if contributions %}
+    <div class="scene-feed-contributions">
+        <div class="scene-feed-contributions-title">Character Contributions</div>
+
+        {% for contribution in contributions %}
+            {% if contribution.contribution %}
+                {% with c=contribution.contribution %}
+                    <div class="scene-feed-contribution-card">
+                        <div class="scene-feed-contribution-name">
+                            {% firstof contribution.name contribution.character.name contribution.slug c.slug "Unknown character" %}
+                        </div>
+                        <div class="scene-feed-contribution-body">
+                            {% include "story/_character_contribution_fields.html" with c=c %}
+
+                            {% if c.authored_intent %}
+                                <div class="intent-tone">
+                                    <strong>Authored Intent:</strong>
+                                    {{ c.authored_intent.purpose }}
+                                    {% if c.authored_intent.next %}
+                                        → {{ c.authored_intent.next }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if c.current_turn_reflection %}
+                                <div class="intent-tone">
+                                    {% if c.current_turn_reflection.active_pressure %}
+                                        <strong>Active Pressure:</strong>
+                                        {{ c.current_turn_reflection.active_pressure }}<br>
+                                    {% endif %}
+                                    {% if c.current_turn_reflection.anticipated_consequence %}
+                                        <strong>Anticipated Consequence:</strong>
+                                        {{ c.current_turn_reflection.anticipated_consequence }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endwith %}
+            {% elif contribution.scene_contribution %}
+                {% with c=contribution.scene_contribution %}
+                    <div class="scene-feed-contribution-card">
+                        <div class="scene-feed-contribution-name">
+                            {% firstof contribution.name contribution.character.name contribution.slug c.slug "Unknown character" %}
+                        </div>
+                        <div class="scene-feed-contribution-body">
+                            {% include "story/_character_contribution_fields.html" with c=c %}
+
+                            {% if contribution.authored_intent %}
+                                <div class="intent-tone">
+                                    <strong>Authored Intent:</strong>
+                                    {{ contribution.authored_intent.purpose }}
+                                    {% if contribution.authored_intent.next %}
+                                        → {{ contribution.authored_intent.next }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if contribution.current_turn_reflection %}
+                                <div class="intent-tone">
+                                    {% if contribution.current_turn_reflection.active_pressure %}
+                                        <strong>Active Pressure:</strong>
+                                        {{ contribution.current_turn_reflection.active_pressure }}<br>
+                                    {% endif %}
+                                    {% if contribution.current_turn_reflection.anticipated_consequence %}
+                                        <strong>Anticipated Consequence:</strong>
+                                        {{ contribution.current_turn_reflection.anticipated_consequence }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endwith %}
+            {% else %}
+                {% with c=contribution %}
+                    <div class="scene-feed-contribution-card">
+                        <div class="scene-feed-contribution-name">
+                            {% firstof contribution.name contribution.character.name contribution.slug c.slug "Unknown character" %}
+                        </div>
+                        <div class="scene-feed-contribution-body">
+                            {% include "story/_character_contribution_fields.html" with c=c %}
+
+                            {% if c.authored_intent %}
+                                <div class="intent-tone">
+                                    <strong>Authored Intent:</strong>
+                                    {{ c.authored_intent.purpose }}
+                                    {% if c.authored_intent.next %}
+                                        → {{ c.authored_intent.next }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if c.current_turn_reflection %}
+                                <div class="intent-tone">
+                                    {% if c.current_turn_reflection.active_pressure %}
+                                        <strong>Active Pressure:</strong>
+                                        {{ c.current_turn_reflection.active_pressure }}<br>
+                                    {% endif %}
+                                    {% if c.current_turn_reflection.anticipated_consequence %}
+                                        <strong>Anticipated Consequence:</strong>
+                                        {{ c.current_turn_reflection.anticipated_consequence }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endwith %}
+            {% endif %}
+        {% endfor %}
+    </div>
+{% endif %}

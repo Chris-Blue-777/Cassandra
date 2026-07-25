@@ -2,6 +2,7 @@
 import json
 from openai import OpenAI
 from story.models import CommittedScene
+from story.coverage import normalize_narrative_frame
 from .characters import build_character_registry
 
 client = OpenAI()
@@ -166,6 +167,27 @@ PERCEPTION_EDGE_SCHEMA = {
         "reason": {"type": "string"},
     },
     "required": ["target_slug", "access", "reason"],
+}
+
+CUE_CHANNEL_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "from_space_id": {"type": "string"},
+        "to_space_id": {"type": "string"},
+        "access": {
+            "type": "string",
+            "enum": [
+                "direct_partial",
+                "mediated_audio",
+                "mediated_text",
+                "inferred",
+                "none",
+            ],
+        },
+        "description": {"type": "string"},
+    },
+    "required": ["from_space_id", "to_space_id", "access", "description"],
 }
 
 VALID_PRESENCE = {"present", "remote", "mentioned", "nearby", "off-screen"}
@@ -377,6 +399,11 @@ def _normalize_scene_participant_output(data, registry=None):
                     "summary_location": None,
                     "camera_scope": "single_space",
                     "active_space_ids": [],
+                    "coverage_mode": "split_screen",
+                    "resolved_space_ids": [],
+                    "reader_visible_space_ids": [],
+                    "cue_channels": [],
+                    "reveal_policy": "show_resolved_spaces_now",
                 },
                 "spaces": {},
                 "cast": {},
@@ -401,13 +428,7 @@ def _normalize_scene_participant_output(data, registry=None):
         raw_narrative_frame = {}
 
     narrative_frame = {
-        "summary_location": raw_narrative_frame.get("summary_location"),
-        "camera_scope": raw_narrative_frame.get("camera_scope") or "single_space",
-        "active_space_ids": [
-            _clean_space_id(space_id)
-            for space_id in raw_narrative_frame.get("active_space_ids", [])
-            if str(space_id).strip()
-        ],
+        **normalize_narrative_frame(raw_narrative_frame, spaces=spaces),
     }
 
     # Build the set of allowed perception targets.
@@ -753,6 +774,16 @@ CORE TASK
 
 Interpret scene_text and map all relevant character references onto canonical identities.
 
+OOC / EDITORIAL DIRECTIVES
+
+scene_text may contain bracketed out-of-character instructions such as:
+- [OOC: surprise me]
+- [OOC: let Cassandra choose]
+
+These are reader/editorial instructions, not in-world speech, narration, action, perception, or character thought.
+Do not treat OOC directives as something any character said, heard, saw, remembered, or did.
+Use them only as a hint that the next scene-state update may need to allow a plausible new arrival, interruption, message, reveal, or event.
+
 You are NOT generating identities.
 You are SELECTING identities from a CLOSED SET defined in character_registry.
 
@@ -900,6 +931,23 @@ narrative_frame:
   - omniscient_multi_space: the narration can show multiple spaces even when characters cannot perceive each other
   - remote_or_unclear: spatial relation is unclear or mediated
 - active_space_ids: every space currently relevant to the scene
+- coverage_mode:
+  - hidden_objective: Cassandra should resolve objective events in multiple spaces, but the user-facing draft should withhold some resolved spaces and surface only allowed cues from them.
+  - split_screen: Cassandra should resolve objective events in multiple spaces and may narrate those spaces directly to the reader.
+- resolved_space_ids: every space Cassandra should objectively resolve this turn, including hidden/off-screen spaces whose events matter.
+- reader_visible_space_ids: the spaces Cassandra is allowed to directly narrate to the reader in the draft.
+- cue_channels: ways information can travel from a hidden or separate space into a reader-visible space, such as muffled audio through a wall, a text, a phone call, or inference from timing.
+- reveal_policy:
+  - show_resolved_spaces_now: use with split_screen.
+  - withhold_until_user_or_arc_changes: use when hidden objective events should remain hidden unless later story direction changes.
+  - withhold_until_explicit_reveal: use when the user clearly wants delayed revelation.
+
+Coverage inference:
+- If the user asks to cut to, show, meanwhile, follow, or directly narrate another room/space, prefer split_screen.
+- If the user stays with one character waiting/listening outside, says not to show what happens yet, or frames the action as sounds/cues through a wall/door/hall, prefer hidden_objective.
+- If existing current_scene_state.narrative_frame.coverage_mode is hidden_objective, preserve it unless scene_text clearly opens the camera or requests a reveal.
+- In hidden_objective, resolved_space_ids may include spaces not listed in reader_visible_space_ids.
+- In split_screen, reader_visible_space_ids normally equals resolved_space_ids.
 
 spaces:
 - Each physical or communicative area relevant to the scene.
@@ -1097,8 +1145,41 @@ SCENE_PARTICIPANT_SCHEMA = {
                             "type": "array",
                             "items": {"type": "string"},
                         },
+                        "coverage_mode": {
+                            "type": "string",
+                            "enum": ["hidden_objective", "split_screen"],
+                        },
+                        "resolved_space_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "reader_visible_space_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "cue_channels": {
+                            "type": "array",
+                            "items": CUE_CHANNEL_SCHEMA,
+                        },
+                        "reveal_policy": {
+                            "type": "string",
+                            "enum": [
+                                "show_resolved_spaces_now",
+                                "withhold_until_user_or_arc_changes",
+                                "withhold_until_explicit_reveal",
+                            ],
+                        },
                     },
-                    "required": ["summary_location", "camera_scope", "active_space_ids"],
+                    "required": [
+                        "summary_location",
+                        "camera_scope",
+                        "active_space_ids",
+                        "coverage_mode",
+                        "resolved_space_ids",
+                        "reader_visible_space_ids",
+                        "cue_channels",
+                        "reveal_policy",
+                    ],
                 },
                 "spaces": {
                     "type": "array",
